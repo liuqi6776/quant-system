@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+*$py.class
+.env
+.ipynb_checkpoints/
+output.txt
+v5_signals_result.txt
