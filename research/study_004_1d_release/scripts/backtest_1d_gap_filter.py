@@ -102,11 +102,6 @@ def backtest_1d(pred_df, ohlc_lookup, pctchg_lookup, threshold, max_pos, stop_lo
     tp_price = np.full(n_pos, 0.0, dtype=np.float64)
     status = np.ones(n_pos, dtype=np.int8)
     daily_pnl = np.zeros(n_dates, dtype=np.float64)
-    
-    # 获取 take_profit
-    take_profit = 0.0
-    # 由于 Python 不允许修改外层参数，通过 inspect.currentframe().f_back.f_locals 这里不优雅，不如直接改签名。
-    # 我们直接把 take_profit 当成 backtest_1d 的参数。
 
     for day_i, d in enumerate(trading_dates):
         open_mask = status == 1
@@ -258,10 +253,7 @@ def run():
     print("Loading OHLC + pct_chg...", flush=True)
     ohlc_lookup, pctchg_lookup = load_ohlc_and_pctchg()
 
-    pred_file = r'C:\Users\liuqi\quant_system_v2\research\studies\study_004_systematic\predictions\predictions_1d_wf_monthly.parquet'
-    if not os.path.exists(pred_file):
-        # Fallback if the open prediction file was intended
-        pred_file = r'C:\Users\liuqi\quant_system_v2\research\study_004_release\predictions\predictions_1d_wf_monthly.parquet'
+    pred_file = r'C:\Users\liuqi\quant_system_v2\research\studies\study_004_systematic\predictions\predictions_1d_open_wf_monthly.parquet'
     pred = pd.read_parquet(pred_file)
     pred['ds'] = pred['trade_date'].astype(str)
     print(f"Predictions: {len(pred)} rows, {pred['ds'].min()}-{pred['ds'].max()}", flush=True)
