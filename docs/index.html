@@ -67,9 +67,35 @@ textarea{resize:vertical}
 .pv{font-size:15px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--ac)}
 .note{margin-top:12px;padding:11px 13px;background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.25);border-radius:7px;font-size:10px;color:var(--yw);line-height:1.7}
 @media(max-width:860px){.main{grid-template-columns:1fr}}
+/* ── Login Gate ── */
+#gate{position:fixed;inset:0;z-index:9999;background:#0d1117;display:flex;align-items:center;justify-content:center;flex-direction:column}
+.gate-box{background:#161b22;border:1px solid #30363d;border-radius:16px;padding:48px 44px;width:340px;text-align:center;box-shadow:0 24px 80px rgba(0,0,0,.6)}
+.gate-logo{width:56px;height:56px;background:linear-gradient(135deg,#58a6ff,#3fb950);border-radius:14px;display:flex;align-items:center;justify-content:center;font-size:26px;margin:0 auto 20px}
+.gate-title{font-size:20px;font-weight:700;margin-bottom:6px}
+.gate-sub{font-size:12px;color:#8b949e;margin-bottom:28px}
+.gate-input{width:100%;background:#1c2230;border:2px solid #30363d;border-radius:8px;color:#e6edf3;font-size:16px;padding:13px 16px;outline:none;text-align:center;letter-spacing:3px;font-family:'JetBrains Mono',monospace;transition:border-color .2s}
+.gate-input:focus{border-color:#58a6ff}
+.gate-input.err{border-color:#f85149;animation:shake .3s}
+@keyframes shake{0%,100%{transform:translateX(0)}25%{transform:translateX(-8px)}75%{transform:translateX(8px)}}
+.gate-btn{width:100%;margin-top:14px;padding:13px;background:#58a6ff;color:#0d1117;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;transition:background .2s}
+.gate-btn:hover{background:#79c0ff}
+.gate-err{color:#f85149;font-size:12px;margin-top:10px;height:18px}
 </style>
 </head>
 <body>
+
+<!-- ── Login Gate ── -->
+<div id="gate">
+  <div class="gate-box">
+    <div class="gate-logo">📈</div>
+    <div class="gate-title">Quant Engine</div>
+    <div class="gate-sub">T+1 News Alpha · 请输入访问密码</div>
+    <input class="gate-input" id="gate-pwd" type="password" placeholder="• • • • •" maxlength="20"
+      onkeydown="if(event.key==='Enter')gateLogin()" autofocus>
+    <button class="gate-btn" onclick="gateLogin()">进入 Dashboard</button>
+    <div class="gate-err" id="gate-err"></div>
+  </div>
+</div>
 <div class="hdr">
   <div class="logo">
     <div class="logo-ic">📈</div>
@@ -165,6 +191,27 @@ textarea{resize:vertical}
 <script>
 const $=id=>document.getElementById(id);
 let ok=false;
+
+// ── Login Gate ──
+const GATE_PWD='liuqe';
+function gateLogin(){
+  const v=$('gate-pwd').value;
+  if(v===GATE_PWD){
+    sessionStorage.setItem('qe_auth','1');
+    $('gate').style.opacity='0';
+    $('gate').style.transition='opacity .4s';
+    setTimeout(()=>$('gate').style.display='none',400);
+  } else {
+    const i=$('gate-pwd');i.classList.add('err');
+    $('gate-err').textContent='密码错误，请重试';
+    setTimeout(()=>{i.classList.remove('err');i.value='';i.focus()},400);
+  }
+}
+// Auto-unlock if already authenticated this session
+if(sessionStorage.getItem('qe_auth')==='1'){
+  $('gate').style.display='none';
+}
+
 window.onload=()=>{const t=new Date().toISOString().slice(0,10);$('pdate').value=t;$('sdate').value=t};
 function apiUrl(){return $('url').value.trim()}
 function headers(){return{'Content-Type':'application/json'}}
