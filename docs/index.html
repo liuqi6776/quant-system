@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quant Engine Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #0d1117; --surface: #161b22; --surface2: #1c2230;
+  --border: #30363d; --accent: #58a6ff; --green: #3fb950;
+  --red: #f85149; --yellow: #d29922; --text: #e6edf3;
+  --text2: #8b949e; --radius: 10px;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+.header{background:linear-gradient(135deg,#0d1117 0%,#1a2236 100%);border-bottom:1px solid var(--border);padding:18px 32px;display:flex;align-items:center;justify-content:space-between}
+.logo{display:flex;align-items:center;gap:12px}
+.logo-icon{width:36px;height:36px;background:linear-gradient(135deg,#58a6ff,#3fb950);border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:18px}
+.logo-text{font-size:16px;font-weight:700;letter-spacing:.5px}
+.logo-sub{font-size:11px;color:var(--text2);font-weight:400}
+#node-badge{display:flex;align-items:center;gap:8px;padding:7px 16px;border-radius:20px;border:1px solid;font-size:12px;font-weight:600;letter-spacing:.8px;transition:all .4s}
+.badge-disconnected{background:rgba(248,81,73,.1);border-color:rgba(248,81,73,.4)!important;color:var(--red)}
+.badge-connected{background:rgba(63,185,80,.1);border-color:rgba(63,185,80,.4)!important;color:var(--green)}
+.pulse{width:8px;height:8px;border-radius:50%;background:currentColor}
+.pulse.on{animation:pulse 1.5s infinite}
+@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.5;transform:scale(.8)}}
+.main{display:grid;grid-template-columns:340px 1fr;gap:20px;padding:24px 32px;max-width:1400px;margin:0 auto}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden}
+.card-header{padding:16px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.card-icon{width:28px;height:28px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:14px}
+.card-title{font-size:13px;font-weight:600;letter-spacing:.3px}
+.card-body{padding:20px}
+label{display:block;font-size:11px;font-weight:600;color:var(--text2);letter-spacing:.6px;text-transform:uppercase;margin-bottom:6px}
+input,textarea{width:100%;background:var(--surface2);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:12px;padding:10px 12px;outline:none;transition:border-color .2s}
+input:focus,textarea:focus{border-color:var(--accent)}
+textarea{resize:vertical;min-height:120px}
+.btn{width:100%;padding:11px;border:none;border-radius:6px;font-size:13px;font-weight:600;cursor:pointer;transition:all .2s;letter-spacing:.3px;margin-top:8px}
+.btn-primary{background:var(--accent);color:#0d1117}
+.btn-primary:hover{background:#79c0ff;transform:translateY(-1px)}
+.btn-primary:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.btn-secondary{background:var(--surface2);color:var(--text2);border:1px solid var(--border)}
+.btn-secondary:hover{border-color:var(--accent);color:var(--accent)}
+.btn-green{background:var(--green);color:#0d1117;margin-top:12px}
+.btn-green:hover{background:#56d364}
+.divider{height:1px;background:var(--border);margin:16px 0}
+.stat-row{display:flex;justify-content:space-between;align-items:center;padding:6px 0;font-size:12px}
+.stat-label{color:var(--text2)}
+.stat-val{font-family:'JetBrains Mono',monospace;color:var(--text);font-weight:500}
+.stat-val.green{color:var(--green)}
+.stat-val.yellow{color:var(--yellow)}
+.stat-val.red{color:var(--red)}
+.right-col{display:flex;flex-direction:column;gap:20px}
+.tabs{display:flex;border-bottom:1px solid var(--border);padding:0 20px}
+.tab{padding:12px 16px;font-size:12px;font-weight:600;cursor:pointer;border-bottom:2px solid transparent;color:var(--text2);transition:all .2s;letter-spacing:.3px}
+.tab.active{color:var(--accent);border-color:var(--accent)}
+.tab-content{display:none;padding:20px}
+.tab-content.active{display:block}
+.signal-card{background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:16px 20px;margin-bottom:12px;position:relative;transition:border-color .2s}
+.signal-card:hover{border-color:var(--accent)}
+.signal-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+.signal-code{font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--text)}
+.signal-prob{display:flex;flex-direction:column;align-items:flex-end;gap:4px}
+.prob-bar-wrap{width:80px;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.prob-bar{height:100%;border-radius:3px;background:linear-gradient(90deg,var(--accent),var(--green))}
+.prob-num{font-size:11px;font-weight:700;color:var(--green);font-family:'JetBrains Mono',monospace}
+.signal-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.signal-item{background:var(--bg);border-radius:6px;padding:8px 10px}
+.signal-item-label{font-size:10px;color:var(--text2);margin-bottom:2px;letter-spacing:.4px}
+.signal-item-val{font-size:12px;font-weight:600;font-family:'JetBrains Mono',monospace}
+.signal-action{margin-top:10px;padding:8px 12px;background:rgba(88,166,255,.08);border:1px solid rgba(88,166,255,.2);border-radius:6px;font-size:11px;color:var(--accent);line-height:1.5}
+.empty-state{text-align:center;padding:48px 20px;color:var(--text2)}
+.empty-state .icon{font-size:40px;margin-bottom:12px}
+.empty-state p{font-size:13px;line-height:1.6}
+.log-area{font-family:'JetBrains Mono',monospace;font-size:11px;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:14px;height:200px;overflow-y:auto;line-height:1.7}
+.log-line{padding:1px 0}
+.log-line.ok{color:var(--green)}
+.log-line.err{color:var(--red)}
+.log-line.info{color:var(--accent)}
+.log-line.dim{color:var(--text2)}
+.spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,.2);border-top-color:#fff;border-radius:50%;animation:spin .7s linear infinite;vertical-align:middle;margin-right:6px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.params-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px}
+.param-box{background:var(--surface2);border:1px solid var(--border);border-radius:6px;padding:12px}
+.param-box .lbl{font-size:10px;color:var(--text2);letter-spacing:.5px;text-transform:uppercase;margin-bottom:4px}
+.param-box .val{font-size:16px;font-weight:700;font-family:'JetBrains Mono',monospace;color:var(--accent)}
+@media(max-width:900px){.main{grid-template-columns:1fr}.header{padding:14px 16px}.main{padding:16px}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="logo">
+    <div class="logo-icon">📈</div>
+    <div>
+      <div class="logo-text">QUANT ENGINE</div>
+      <div class="logo-sub">T+1 News Alpha · Study 004</div>
+    </div>
+  </div>
+  <div id="node-badge" class="badge-disconnected">
+    <div class="pulse" id="pulse-dot"></div>
+    <span id="badge-text">NODE DISCONNECTED</span>
+  </div>
+</div>
+
+<div class="main">
+  <!-- LEFT SIDEBAR -->
+  <div style="display:flex;flex-direction:column;gap:20px">
+
+    <!-- CONNECTION CARD -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon" style="background:rgba(88,166,255,.15)">🔌</div>
+        <div class="card-title">Connection</div>
+      </div>
+      <div class="card-body">
+        <label>FastAPI Endpoint URL</label>
+        <input id="api-url" type="text" value="http://127.0.0.1:8000">
+        <button class="btn btn-secondary" id="ping-btn" onclick="testPing()" style="margin-top:10px">Test Ping</button>
+        <div class="divider"></div>
+        <div class="stat-row"><span class="stat-label">Status</span><span class="stat-val" id="conn-status">—</span></div>
+        <div class="stat-row"><span class="stat-label">Last Check</span><span class="stat-val" id="conn-time">—</span></div>
+        <div class="stat-row"><span class="stat-label">Predictions Data</span><span class="stat-val" id="data-range">—</span></div>
+      </div>
+    </div>
+
+    <!-- DATA INPUT CARD -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon" style="background:rgba(63,185,80,.15)">📥</div>
+        <div class="card-title">Data Input</div>
+      </div>
+      <div class="card-body">
+        <label>Target Date (T 日)</label>
+        <input id="target-date" type="date">
+
+        <div style="margin-top:14px">
+          <label>News JSON（news_major1）</label>
+          <textarea id="news-json" placeholder='粘贴 analysis_YYYY-MM-DD.json 内容（可选）&#10;{"stocks":[...],"market_impact":0.5}'></textarea>
+        </div>
+
+        <button class="btn btn-green" id="run-btn" onclick="runPipeline()" disabled>
+          Push to Local Engine
+        </button>
+      </div>
+    </div>
+
+    <!-- STRATEGY PARAMS -->
+    <div class="card">
+      <div class="card-header">
+        <div class="card-icon" style="background:rgba(210,153,34,.15)">⚙️</div>
+        <div class="card-title">Strategy Params</div>
+      </div>
+      <div class="card-body">
+        <div class="params-grid">
+          <div class="param-box"><div class="lbl">Threshold</div><div class="val">0.50</div></div>
+          <div class="param-box"><div class="lbl">Max Positions</div><div class="val">3</div></div>
+          <div class="param-box"><div class="lbl">Gap Up Range</div><div class="val" style="font-size:13px">2%~6%</div></div>
+          <div class="param-box"><div class="lbl">Hold Days</div><div class="val">T+1→T+2</div></div>
+          <div class="param-box"><div class="lbl">Stop Loss</div><div class="val" style="color:var(--red)">-5%</div></div>
+          <div class="param-box"><div class="lbl">Take Profit</div><div class="val" style="color:var(--green)">+5%</div></div>
+        </div>
+        <button class="btn btn-secondary" onclick="triggerRetrain()" style="font-size:11px">
+          🔄 Trigger Monthly Retrain
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- RIGHT MAIN CONTENT -->
+  <div class="right-col">
+    <div class="card" style="flex:1">
+      <div class="tabs">
+        <div class="tab active" onclick="switchTab('results',this)">📊 Results</div>
+        <div class="tab" onclick="switchTab('log',this)">📋 Log</div>
+      </div>
+
+      <!-- RESULTS TAB -->
+      <div class="tab-content active" id="tab-results">
+        <div id="results-container">
+          <div class="empty-state">
+            <div class="icon">🔍</div>
+            <p>连接到本地引擎后，选择日期并点击<br><strong>Push to Local Engine</strong> 获取今日信号</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- LOG TAB -->
+      <div class="tab-content" id="tab-log">
+        <div class="log-area" id="log-area">
+          <div class="log-line dim">— Dashboard initialized —</div>
+        </div>
+        <button class="btn btn-secondary" onclick="clearLog()" style="margin-top:8px;width:auto;padding:6px 14px;font-size:11px">Clear</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let isConnected = false;
+
+// ── Init ──
+window.onload = () => {
+  const today = new Date().toISOString().slice(0,10);
+  $('target-date').value = today;
+};
+
+// ── Log ──
+function log(msg, type='dim'){
+  const el = $('log-area');
+  const time = new Date().toLocaleTimeString('zh-CN');
+  const line = document.createElement('div');
+  line.className = `log-line ${type}`;
+  line.textContent = `[${time}] ${msg}`;
+  el.appendChild(line);
+  el.scrollTop = el.scrollHeight;
+}
+function clearLog(){ $('log-area').innerHTML = '<div class="log-line dim">— Log cleared —</div>'; }
+
+// ── Tabs ──
+function switchTab(name, el){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t=>t.classList.remove('active'));
+  el.classList.add('active');
+  $(`tab-${name}`).classList.add('active');
+}
+
+// ── Connection ──
+function setConnected(ok, detail=''){
+  isConnected = ok;
+  const badge = $('node-badge');
+  const dot = $('pulse-dot');
+  const text = $('badge-text');
+  const btn = $('run-btn');
+  if(ok){
+    badge.className='badge-connected';
+    dot.className='pulse on';
+    text.textContent='NODE CONNECTED';
+    btn.disabled=false;
+    $('conn-status').textContent='Online';
+    $('conn-status').className='stat-val green';
+  } else {
+    badge.className='badge-disconnected';
+    dot.className='pulse';
+    text.textContent='NODE DISCONNECTED';
+    btn.disabled=true;
+    $('conn-status').textContent='Offline';
+    $('conn-status').className='stat-val red';
+  }
+  $('conn-time').textContent = new Date().toLocaleTimeString('zh-CN');
+  if(detail) log(detail, ok?'ok':'err');
+}
+
+async function testPing(){
+  const url = $('api-url').value.trim();
+  const btn = $('ping-btn');
+  btn.innerHTML='<span class="spinner"></span>Pinging…';
+  btn.disabled=true;
+  log(`Pinging ${url}/health …`,'info');
+  try{
+    const r = await fetch(`${url}/health`,{signal:AbortSignal.timeout(5000)});
+    if(!r.ok) throw new Error(`HTTP ${r.status}`);
+    const d = await r.json();
+    setConnected(true, `✓ ${d.msg}`);
+    // update data range
+    if(d.data_status?.predictions?.exists){
+      const p = d.data_status.predictions;
+      $('data-range').textContent = `${p.date_min} ~ ${p.date_max}`;
+      $('data-range').className = 'stat-val green';
+    }
+  } catch(e){
+    setConnected(false, `✗ Connection failed: ${e.message}`);
+  } finally{
+    btn.textContent='Test Ping';
+    btn.disabled=false;
+  }
+}
+
+// ── Pipeline ──
+async function runPipeline(){
+  const url = $('api-url').value.trim();
+  const date = $('target-date').value;
+  const newsRaw = $('news-json').value.trim();
+  if(!date){ alert('请选择日期'); return; }
+
+  const btn = $('run-btn');
+  btn.innerHTML='<span class="spinner"></span>Processing…';
+  btn.disabled=true;
+  switchTab('log', document.querySelectorAll('.tab')[1]);
+  log(`── Pipeline run: date=${date} ──`,'info');
+
+  const body = { target_date: date };
+  if(newsRaw){
+    try{ JSON.parse(newsRaw); body.news_data = newsRaw; }
+    catch{ log('⚠ News JSON 格式错误，已跳过','err'); }
+  }
+
+  try{
+    const r = await fetch(`${url}/api/v1/pipeline/run`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(30000),
+    });
+    if(!r.ok){
+      const err = await r.json().catch(()=>({detail:'Unknown error'}));
+      throw new Error(err.detail||`HTTP ${r.status}`);
+    }
+    const d = await r.json();
+    d.steps?.forEach(s => log(s, s.startsWith('✓')?'ok':s.startsWith('⚠')?'err':'dim'));
+    log(`信号数量: ${d.signal_count}`,'ok');
+    renderResults(d.results, date, d.signal_count);
+    switchTab('results', document.querySelectorAll('.tab')[0]);
+  } catch(e){
+    log(`✗ Error: ${e.message}`,'err');
+  } finally{
+    btn.innerHTML='Push to Local Engine';
+    btn.disabled=false;
+  }
+}
+
+// ── Render Signals ──
+function renderResults(signals, date, count){
+  const container = $('results-container');
+  if(!signals || signals.length===0){
+    container.innerHTML=`
+      <div class="empty-state">
+        <div class="icon">📭</div>
+        <p><strong>${date}</strong> 当日无满足条件的信号<br>
+        <span style="font-size:11px;color:var(--text2)">prob ≥ 0.50 的标的为 0 个</span></p>
+      </div>`;
+    return;
+  }
+
+  const ranks = ['🥇','🥈','🥉'];
+  let html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">
+      <div style="font-size:13px;font-weight:600">T+1 候选标的 <span style="color:var(--text2);font-weight:400">(${date})</span></div>
+      <div style="font-size:11px;color:var(--text2)">共 ${count} 个信号 · 显示前 ${signals.length} 个</div>
+    </div>`;
+
+  signals.forEach((s,i) => {
+    const pct = Math.round(s.prob * 100);
+    const priceStr = s.entry_price ? `¥${s.entry_price.toFixed(2)}` : 'N/A';
+    html += `
+    <div class="signal-card">
+      <div class="signal-header">
+        <div>
+          <div style="font-size:11px;color:var(--text2);margin-bottom:4px">${ranks[i]||'#'+(i+1)} 候选标的</div>
+          <div class="signal-code">${s.ts_code}</div>
+        </div>
+        <div class="signal-prob">
+          <div class="prob-num">${pct}% 置信度</div>
+          <div class="prob-bar-wrap"><div class="prob-bar" style="width:${pct}%"></div></div>
+        </div>
+      </div>
+      <div class="signal-grid">
+        <div class="signal-item">
+          <div class="signal-item-label">预计开盘价</div>
+          <div class="signal-item-val" style="color:var(--accent)">${priceStr}</div>
+        </div>
+        <div class="signal-item">
+          <div class="signal-item-label">止损线</div>
+          <div class="signal-item-val" style="color:var(--red)">${s.stop_loss}</div>
+        </div>
+        <div class="signal-item">
+          <div class="signal-item-label">止盈线</div>
+          <div class="signal-item-val" style="color:var(--green)">${s.take_profit}</div>
+        </div>
+      </div>
+      <div class="signal-action">⚡ ${s.action}</div>
+    </div>`;
+  });
+
+  html += `
+    <div style="margin-top:16px;padding:14px 16px;background:rgba(210,153,34,.08);border:1px solid rgba(210,153,34,.25);border-radius:8px;font-size:11px;color:var(--yellow);line-height:1.7">
+      ⚠️ <strong>实盘操作提醒</strong>：T+1 日 9:25 集合竞价结束后，计算每只标的实际高开幅度。
+      仅当高开幅度在 <strong>2%~6%</strong> 区间内时，才以开盘价市价委托买入。持有至 T+2 日，
+      盘中涨 5% 止盈 / 跌 5% 止损，否则收盘前平仓。
+    </div>`;
+
+  container.innerHTML = html;
+}
+
+// ── Retrain ──
+async function triggerRetrain(){
+  if(!isConnected){ alert('请先连接本地引擎'); return; }
+  if(!confirm('确认触发月度 Retrain？预计耗时 30-60 分钟，将在后台运行。')) return;
+  const url = $('api-url').value.trim();
+  log('⏳ 触发月度 Retrain…','info');
+  try{
+    const r = await fetch(`${url}/api/v1/retrain/trigger?background=true`,{method:'POST'});
+    const d = await r.json();
+    log(`✓ ${d.msg}`,'ok');
+  } catch(e){
+    log(`✗ Retrain trigger failed: ${e.message}`,'err');
+  }
+}
+</script>
+</body>
+</html>
