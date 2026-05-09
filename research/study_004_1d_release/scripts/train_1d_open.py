@@ -6,9 +6,11 @@ from xgboost import XGBClassifier
 
 sys.stdout.reconfigure(line_buffering=True)
 
-STUDY_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+STUDY_DIR = os.path.dirname(SCRIPT_DIR)  # study_004_1d_release/
 FEATURES_FILE = os.path.join(STUDY_DIR, 'data', 'all_features_v2.parquet')
 OUTPUT = os.path.join(STUDY_DIR, 'predictions', 'predictions_1d_open_wf_monthly.parquet')
+os.makedirs(os.path.dirname(OUTPUT), exist_ok=True)
 TRAIN_START = '20200101'
 
 def get_feature_cols(df):

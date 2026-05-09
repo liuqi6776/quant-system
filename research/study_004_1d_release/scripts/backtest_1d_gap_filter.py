@@ -8,8 +8,9 @@ import matplotlib.pyplot as plt
 
 sys.stdout.reconfigure(line_buffering=True)
 
-STUDY_DIR = os.path.dirname(os.path.abspath(__file__))
-FEATURES_FILE = r'C:\Users\liuqi\quant_system_v2\research\studies\study_004_systematic\data\all_features_v2.parquet'
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+STUDY_DIR = os.path.dirname(SCRIPT_DIR)  # study_004_1d_release/
+FEATURES_FILE = os.path.join(STUDY_DIR, 'data', 'all_features_v2.parquet')
 RESULTS_DIR = os.path.join(STUDY_DIR, 'results')
 os.makedirs(RESULTS_DIR, exist_ok=True)
 
@@ -253,7 +254,7 @@ def run():
     print("Loading OHLC + pct_chg...", flush=True)
     ohlc_lookup, pctchg_lookup = load_ohlc_and_pctchg()
 
-    pred_file = r'C:\Users\liuqi\quant_system_v2\research\studies\study_004_systematic\predictions\predictions_1d_open_wf_monthly.parquet'
+    pred_file = os.path.join(STUDY_DIR, 'predictions', 'predictions_1d_open_wf_monthly.parquet')
     pred = pd.read_parquet(pred_file)
     pred['ds'] = pred['trade_date'].astype(str)
     print(f"Predictions: {len(pred)} rows, {pred['ds'].min()}-{pred['ds'].max()}", flush=True)
