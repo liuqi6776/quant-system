@@ -86,9 +86,8 @@ textarea{resize:vertical}
       <div class="ch">🔌 Connection</div>
       <div class="cb">
         <label>FastAPI Endpoint URL</label>
-        <input id="url" value="http://127.0.0.1:8000">
-        <label>密码 (X-API-Key)</label>
-        <input id="pwd" type="password" value="liuqe" placeholder="liuqe">
+        <input id="url" value="http://127.0.0.1:8000" placeholder="http://127.0.0.1:8000 或 ngrok URL">
+        <div style="font-size:10px;color:var(--tx2);margin-top:5px">跨网络请用 <b style='color:var(--ac)'>ngrok http 8000</b> 后粘贴 https://xxx.ngrok-free.app</div>
         <button class="btn bs" onclick="testPing()">Test Ping</button>
         <div class="div"></div>
         <div class="sr"><span class="sl">Status</span><span class="sv" id="cs">—</span></div>
@@ -168,7 +167,7 @@ const $=id=>document.getElementById(id);
 let ok=false;
 window.onload=()=>{const t=new Date().toISOString().slice(0,10);$('pdate').value=t;$('sdate').value=t};
 function apiUrl(){return $('url').value.trim()}
-function headers(){return{'Content-Type':'application/json','X-API-Key':$('pwd').value.trim()}}
+function headers(){return{'Content-Type':'application/json'}}
 
 function log(msg,t='dim'){const e=$('log'),d=document.createElement('div');d.className='ll '+t;d.textContent='['+new Date().toLocaleTimeString('zh-CN')+'] '+msg;e.appendChild(d);e.scrollTop=e.scrollHeight}
 function clrlog(){$('log').innerHTML='<div class="ll dim">— Cleared —</div>'}

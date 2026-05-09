@@ -2,14 +2,10 @@
 api_server.py — 本地量化引擎 API 服务
 连接云端 GitHub Pages Dashboard 与本地计算环境
 
-启动方式 (外网可访问):
+启动方式:
     python api_server.py
-    # 或
-    uvicorn api_server:app --host 0.0.0.0 --port 8000
-
-密码验证: 所有接口需在 Header 中带 X-API-Key: liuqe
-测试:
-    curl -H "X-API-Key: liuqe" http://localhost:8000/health
+    # 或配合 ngrok 公网穿透:
+    ngrok http 8000
 """
 import os, json, sys, subprocess, logging, re
 from datetime import datetime
@@ -17,7 +13,7 @@ from pathlib import Path
 from typing import Optional
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request, Header, Depends
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -30,7 +26,6 @@ TRAIN_SCRIPT    = STUDY_DIR / "scripts/train_1d_open.py"
 NEWS_DIR        = Path("D:/iquant_data/data_v2/news_major1")
 
 # ───────────────────────────── 参数 ─────────────────────────────────
-API_PASSWORD    = "liuqe"
 PROB_THRESHOLD  = 0.50
 MAX_POSITIONS   = 3
 GAP_UP_LOW      = 0.02
@@ -56,13 +51,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# ─────────────────────── 密码验证依赖 ───────────────────────────────
-def verify_api_key(x_api_key: Optional[str] = Header(default=None)):
-    if x_api_key != API_PASSWORD:
-        raise HTTPException(status_code=401, detail="Invalid API Key. Please set X-API-Key header.")
-    return x_api_key
-
 
 # ─────────────────────── 数据模型 ───────────────────────────────────
 class PipelineRequest(BaseModel):
@@ -202,7 +190,7 @@ def get_data_status() -> dict:
 
 # ─────────────────────── 接口定义 ───────────────────────────────────
 @app.get("/health")
-def health_check(api_key: str = Depends(verify_api_key)):
+def health_check():
     """连通性测试 — 需要 X-API-Key 验证"""
     return {
         "status": "ok",
@@ -213,7 +201,7 @@ def health_check(api_key: str = Depends(verify_api_key)):
 
 
 @app.get("/api/v1/signals")
-def get_signals(date: str, api_key: str = Depends(verify_api_key)):
+def get_signals(date: str):
     """获取指定日期的交易信号。date 格式: 20260509 或 2026-05-09"""
     date_norm = normalize_date(date)
     try:
@@ -224,7 +212,7 @@ def get_signals(date: str, api_key: str = Depends(verify_api_key)):
 
 
 @app.post("/api/v1/parse/html")
-async def parse_html_to_json(payload: ParseHtmlRequest, api_key: str = Depends(verify_api_key)):
+async def parse_html_to_json(payload: ParseHtmlRequest):
     """
     将 raw HTML 或 Markdown 原文解析成 news_major1 JSON 格式。
     流程: 提取正文 → 调用 ZhipuAI GLM 分析 → 返回 JSON（可选保存到本地）
@@ -282,7 +270,7 @@ async def parse_html_to_json(payload: ParseHtmlRequest, api_key: str = Depends(v
 
 
 @app.post("/api/v1/pipeline/run")
-async def run_pipeline(payload: PipelineRequest, api_key: str = Depends(verify_api_key)):
+async def run_pipeline(payload: PipelineRequest):
     """
     主流程接口:
     1. 保存 news JSON 到本地（如果提供）
@@ -321,7 +309,7 @@ async def run_pipeline(payload: PipelineRequest, api_key: str = Depends(verify_a
 
 
 @app.post("/api/v1/retrain/trigger")
-async def trigger_retrain(api_key: str = Depends(verify_api_key)):
+async def trigger_retrain():
     """后台触发月度 retrain（异步，预计 30-60 分钟）"""
     subprocess.Popen(
         [sys.executable, str(TRAIN_SCRIPT)],
@@ -337,7 +325,6 @@ if __name__ == "__main__":
     import uvicorn
     print("=" * 60)
     print("  Quant Local Engine  |  0.0.0.0:8000")
-    print("  Password: X-API-Key: liuqe")
     print("  Docs:  http://127.0.0.1:8000/docs")
     print("=" * 60)
     uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=False, log_level="info")
