@@ -5,3 +5,7 @@ __pycache__/
 .ipynb_checkpoints/
 output.txt
 v5_signals_result.txt
+
+# Large data files (>100MB, exceed GitHub limit)
+research/**/data/*.parquet
+research/**/predictions/*.parquet
