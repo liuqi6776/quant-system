@@ -99,7 +99,7 @@ textarea{resize:vertical}
 <div class="hdr">
   <div class="logo">
     <div class="logo-ic">📈</div>
-    <div><div class="logo-t">QUANT ENGINE</div><div class="logo-s">T+1 News Alpha · Study 004</div></div>
+    <div><div class="logo-t">QUANT ENGINE</div><div class="logo-s">T+1 News Alpha</div></div>
   </div>
   <div id="badge" class="disc"><div class="dot" id="dot"></div><span id="bt">NODE DISCONNECTED</span></div>
 </div>
@@ -112,7 +112,7 @@ textarea{resize:vertical}
       <div class="ch">🔌 Connection</div>
       <div class="cb">
         <label>FastAPI Endpoint URL</label>
-        <input id="url" value="http://127.0.0.1:8000" placeholder="http://127.0.0.1:8000 或 ngrok URL">
+        <input id="url" value="https://percolate-zipfile-corned.ngrok-free.dev" placeholder="http://127.0.0.1:8000 或 ngrok URL">
         <div style="font-size:10px;color:var(--tx2);margin-top:5px">跨网络请用 <b style='color:var(--ac)'>ngrok http 8000</b> 后粘贴 https://xxx.ngrok-free.app</div>
         <button class="btn bs" onclick="testPing()">Test Ping</button>
         <div class="div"></div>
@@ -143,8 +143,19 @@ textarea{resize:vertical}
     <div class="card">
       <div class="ch">🚀 Step 2: 推送信号</div>
       <div class="cb">
-        <label>Target Date (T 日)</label>
-        <input id="sdate" type="date">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+          <div>
+            <label>Target Date (T 日)</label>
+            <input id="sdate" type="date">
+          </div>
+          <div>
+            <label>交易策略模型</label>
+            <select id="strategy" style="cursor:pointer">
+              <option value="conservative">保守防守版 (005) - 低回撤</option>
+              <option value="aggressive">激进进攻版 (004) - 高收益</option>
+            </select>
+          </div>
+        </div>
         <label>News JSON（可选，从上方 Parse 结果自动填入）</label>
         <textarea id="njson" style="min-height:60px;font-size:10px" placeholder="留空则直接读取已有预测信号"></textarea>
         <button class="btn bg" id="run-btn" onclick="runPipeline()" disabled>Push to Local Engine</button>
@@ -214,7 +225,7 @@ if(sessionStorage.getItem('qe_auth')==='1'){
 
 window.onload=()=>{const t=new Date().toISOString().slice(0,10);$('pdate').value=t;$('sdate').value=t};
 function apiUrl(){return $('url').value.trim()}
-function headers(){return{'Content-Type':'application/json'}}
+function headers(){return{'Content-Type':'application/json','ngrok-skip-browser-warning':'true'}}
 
 function log(msg,t='dim'){const e=$('log'),d=document.createElement('div');d.className='ll '+t;d.textContent='['+new Date().toLocaleTimeString('zh-CN')+'] '+msg;e.appendChild(d);e.scrollTop=e.scrollHeight}
 function clrlog(){$('log').innerHTML='<div class="ll dim">— Cleared —</div>'}
@@ -290,11 +301,11 @@ function copyToSignal(){
 
 async function runPipeline(){
   if(!ok){alert('请先连接');return}
-  const date=$('sdate').value,njson=$('njson').value.trim();
+  const date=$('sdate').value,njson=$('njson').value.trim(),strat=$('strategy').value;
   if(!date){alert('请选择日期');return}
   const btn=$('run-btn');btn.innerHTML='<span class="sp"></span>Processing…';btn.disabled=true;
-  log('── Pipeline: '+date+' ──','inf');sw('log',document.querySelectorAll('.tab')[1]);
-  const body={target_date:date};if(njson)body.news_json=njson;
+  log('── Pipeline: '+date+' ('+strat+') ──','inf');sw('log',document.querySelectorAll('.tab')[1]);
+  const body={target_date:date,strategy:strat};if(njson)body.news_json=njson;
   try{
     const r=await fetch(apiUrl()+'/api/v1/pipeline/run',{method:'POST',headers:headers(),body:JSON.stringify(body),signal:AbortSignal.timeout(30000)});
     if(!r.ok){const e=await r.json().catch(()=>({detail:'Error'}));throw new Error(e.detail)}

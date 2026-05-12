@@ -20,16 +20,13 @@ from pydantic import BaseModel
 # ───────────────────────────── 路径配置 ─────────────────────────────
 BASE_DIR        = Path(__file__).parent.resolve()
 JIAYO_DIR       = BASE_DIR / "jiayo-analysis"
-STUDY_DIR       = BASE_DIR / "research/study_004_1d_release"
-PREDICTIONS_FILE = STUDY_DIR / "predictions/predictions_1d_open_wf_monthly.parquet"
-TRAIN_SCRIPT    = STUDY_DIR / "scripts/train_1d_open.py"
 NEWS_DIR        = Path("D:/iquant_data/data_v2/news_major1")
 
+PRED_FILE_004 = BASE_DIR / "research/study_004_1d_release/predictions/predictions_1d_open_wf_monthly.parquet"
+PRED_FILE_005 = BASE_DIR / "research/study_005_1d_advanced/predictions/predictions_005_wf.parquet"
+
 # ───────────────────────────── 参数 ─────────────────────────────────
-PROB_THRESHOLD  = 0.50
 MAX_POSITIONS   = 3
-GAP_UP_LOW      = 0.02
-GAP_UP_HIGH     = 0.06
 STOP_LOSS       = -0.05
 TAKE_PROFIT     = 0.05
 
@@ -43,6 +40,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "https://liuqi6776.github.io",
+        "https://percolate-zipfile-corned.ngrok-free.dev",
         "http://localhost:3000", "http://127.0.0.1:3000",
         "http://localhost:5500", "http://127.0.0.1:5500",
         "null",
@@ -56,6 +54,7 @@ app.add_middleware(
 class PipelineRequest(BaseModel):
     target_date: str          # YYYY-MM-DD
     news_json: Optional[str] = None  # 已经解析好的 JSON 字符串
+    strategy: str = "conservative" # conservative 或 aggressive
 
 class ParseHtmlRequest(BaseModel):
     target_date: str          # YYYY-MM-DD
@@ -69,27 +68,78 @@ def normalize_date(date_str: str) -> str:
     return date_str.replace("-", "")
 
 
-def get_signals_for_date(date_norm: str) -> list:
-    if not PREDICTIONS_FILE.exists():
-        raise FileNotFoundError(f"预测文件不存在: {PREDICTIONS_FILE}")
-    df = pd.read_parquet(PREDICTIONS_FILE, columns=["trade_date", "ts_code", "prob", "entry_price"])
+def get_public_url() -> str:
+    try:
+        import urllib.request
+        resp = urllib.request.urlopen("http://127.0.0.1:4040/api/tunnels", timeout=2)
+        tunnels = json.loads(resp.read().decode()).get("tunnels", [])
+        if tunnels:
+            return tunnels[0].get("public_url", "http://127.0.0.1:8000")
+    except Exception:
+        pass
+    return "http://127.0.0.1:8000"
+
+
+def get_signals_for_date(date_norm: str, strategy: str = "conservative") -> dict:
+    is_conservative = (strategy == "conservative")
+    pred_file = PRED_FILE_005 if is_conservative else PRED_FILE_004
+    
+    if not pred_file.exists():
+        raise FileNotFoundError(f"预测文件不存在: {pred_file}")
+        
+    df = pd.read_parquet(pred_file)
     df["trade_date"] = df["trade_date"].astype(str)
     today = df[df["trade_date"] == date_norm].copy()
+    
     if today.empty:
-        return []
-    candidates = today[today["prob"] >= PROB_THRESHOLD].nlargest(MAX_POSITIONS, "prob").reset_index(drop=True)
+        return {"signals": [], "is_fallback": False, "no_data": True}
+        
+    if is_conservative:
+        above = today[(today["prob_up"] >= 0.50) & (today["prob_crash"] <= 0.15)].copy()
+        above = above.sort_values("prob_up", ascending=False)
+        ind_counts = {}
+        candidates = []
+        for _, row in above.iterrows():
+            ind = row.get("industry", "Unknown")
+            if ind_counts.get(ind, 0) >= 2:
+                continue
+            candidates.append(row)
+            ind_counts[ind] = ind_counts.get(ind, 0) + 1
+            if len(candidates) >= MAX_POSITIONS:
+                break
+        candidates = pd.DataFrame(candidates) if candidates else pd.DataFrame(columns=today.columns)
+        fallback_col = "prob_up"
+    else:
+        above = today[today["prob"] >= 0.50]
+        if len(above) >= MAX_POSITIONS:
+            candidates = above.nlargest(MAX_POSITIONS, "prob").reset_index(drop=True)
+        else:
+            candidates = above.reset_index(drop=True)
+        fallback_col = "prob"
+
+    is_fallback = len(candidates) == 0
+    if is_fallback:
+        top5 = today.nlargest(5, fallback_col)
+        candidates = top5.reset_index(drop=True)
+        
     results = []
     for _, row in candidates.iterrows():
         ep = row["entry_price"] if pd.notna(row["entry_price"]) else None
+        
+        prob_val = float(row["prob_up"]) if is_conservative else float(row["prob"])
+        extra_info = ""
+        if is_conservative:
+            extra_info = f" | 防守指标: 暴跌概率 {float(row['prob_crash']):.1%} | 板块: {row.get('industry', 'Unknown')}"
+            
         results.append({
             "ts_code":     row["ts_code"],
-            "prob":        round(float(row["prob"]), 4),
+            "prob":        round(prob_val, 4),
             "entry_price": round(float(ep), 2) if ep else None,
-            "action":      f"T+1 集合竞价后判断：若高开幅度在 {GAP_UP_LOW*100:.0f}%~{GAP_UP_HIGH*100:.0f}%，以开盘价买入",
+            "action":      f"T+1 以开盘价买入{extra_info}",
             "stop_loss":   f"{STOP_LOSS*100:.0f}%",
-            "take_profit": f"+{TAKE_PROFIT*100:.0f}%",
+            "take_profit": f"+6% 回落移动止盈" if is_conservative else f"+{TAKE_PROFIT*100:.0f}%",
         })
-    return results
+    return {"signals": results, "is_fallback": is_fallback}
 
 
 def extract_content_from_html(html: str) -> tuple[str, str]:
@@ -179,36 +229,46 @@ def analyze_with_zhipu(title: str, content: str) -> Optional[dict]:
 
 def get_data_status() -> dict:
     status = {}
-    if PREDICTIONS_FILE.exists():
-        df = pd.read_parquet(PREDICTIONS_FILE, columns=["trade_date"])
-        dates = df["trade_date"].astype(str)
-        status["predictions"] = {"exists": True, "rows": len(df), "date_min": dates.min(), "date_max": dates.max()}
-    else:
-        status["predictions"] = {"exists": False}
+    for name, path in [("predictions_aggressive", PRED_FILE_004), ("predictions_conservative", PRED_FILE_005)]:
+        if path.exists():
+            df = pd.read_parquet(path, columns=["trade_date"])
+            dates = df["trade_date"].astype(str)
+            status[name] = {"exists": True, "rows": len(df), "date_min": dates.min(), "date_max": dates.max()}
+        else:
+            status[name] = {"exists": False}
     return status
 
 
 # ─────────────────────── 接口定义 ───────────────────────────────────
 @app.get("/health")
 def health_check():
-    """连通性测试 — 需要 X-API-Key 验证"""
+    """连通性测试"""
     return {
         "status": "ok",
         "msg": "Local Quant Engine is Online ✓",
+        "endpoint": get_public_url(),
         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "data_status": get_data_status(),
     }
 
 
 @app.get("/api/v1/signals")
-def get_signals(date: str):
-    """获取指定日期的交易信号。date 格式: 20260509 或 2026-05-09"""
+def get_signals(date: str, strategy: str = "conservative"):
+    """获取指定日期的交易信号。date 格式: 20260509 或 2026-05-09，strategy: conservative 或 aggressive"""
     date_norm = normalize_date(date)
     try:
-        signals = get_signals_for_date(date_norm)
+        result = get_signals_for_date(date_norm, strategy)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e))
-    return {"status": "ok", "date": date_norm, "signals": signals, "signal_count": len(signals)}
+    sigs = result["signals"]
+    is_fb = result["is_fallback"]
+    no_data = result.get("no_data", False)
+    resp = {"status": "ok", "date": date_norm, "strategy": strategy, "signals": sigs, "signal_count": len(sigs)}
+    if no_data:
+        resp["warning"] = f"日期 {date_norm} 无预测数据"
+    elif is_fb:
+        resp["warning"] = "无股票满足筛选条件，以下为prob最高的5只股票（仅供参考，非正式信号）"
+    return resp
 
 
 @app.post("/api/v1/parse/html")
@@ -279,6 +339,8 @@ async def run_pipeline(payload: PipelineRequest):
     date_raw  = payload.target_date
     date_norm = normalize_date(date_raw)
     date_fmt  = f"{date_raw[:4]}-{date_raw[5:7]}-{date_raw[8:10]}"
+    
+    strategy = payload.strategy
 
     steps = []
 
@@ -294,37 +356,46 @@ async def run_pipeline(payload: PipelineRequest):
         steps.append("ℹ 本次未附带新闻JSON")
 
     try:
-        signals = get_signals_for_date(date_norm)
-        steps.append(f"✓ 信号读取完成: {len(signals)} 个候选标的")
+        result = get_signals_for_date(date_norm, strategy)
+        sigs = result["signals"]
+        is_fb = result["is_fallback"]
+        no_data = result.get("no_data", False)
+        step_msg = f"✓ 信号读取完成: {len(sigs)} 个候选标的"
+        if no_data:
+            step_msg += f" ⚠ 日期 {date_norm} 无预测数据"
+        elif is_fb:
+            step_msg += " ⚠ 无满足条件股票，显示prob最高5只"
+        steps.append(step_msg)
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=f"预测文件缺失: {e}")
 
-    return {
+    resp = {
         "status": "success",
         "date": date_norm,
         "steps": steps,
-        "signal_count": len(signals),
-        "results": signals,
+        "signal_count": len(sigs),
+        "results": sigs,
     }
+    if no_data:
+        resp["warning"] = f"日期 {date_norm} 无预测数据"
+    elif is_fb:
+        resp["warning"] = "无股票满足筛选条件，以下为prob最高的5只股票（仅供参考，非正式信号）"
+    return resp
 
 
 @app.post("/api/v1/retrain/trigger")
 async def trigger_retrain():
     """后台触发月度 retrain（异步，预计 30-60 分钟）"""
-    subprocess.Popen(
-        [sys.executable, str(TRAIN_SCRIPT)],
-        cwd=str(BASE_DIR),
-        stdout=open(BASE_DIR / "retrain.log", "w"),
-        stderr=subprocess.STDOUT,
-    )
-    return {"status": "started", "msg": "Retrain 已在后台启动，查看 retrain.log 获取进度"}
+    return {"status": "started", "msg": "Retrain endpoint temporarily disabled during refactor"}
 
 
 # ─────────────────────── 启动入口 ───────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
+    public_url = get_public_url()
     print("=" * 60)
-    print("  Quant Local Engine  |  0.0.0.0:8000")
-    print("  Docs:  http://127.0.0.1:8000/docs")
+    print(f"  Quant Local Engine")
+    print(f"  Endpoint: {public_url}")
+    print(f"  Docs:     {public_url}/docs")
     print("=" * 60)
     uvicorn.run("api_server:app", host="0.0.0.0", port=8000, reload=False, log_level="info")
