@@ -11,6 +11,10 @@ import os, json, sys, subprocess, logging, re
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
+from dotenv import load_dotenv
+
+# 加载环境变量
+load_dotenv()
 
 import pandas as pd
 from fastapi import FastAPI, HTTPException, Request
@@ -171,7 +175,7 @@ def analyze_with_zhipu(title: str, content: str) -> Optional[dict]:
     """调用 ZhipuAI GLM 分析文章，复用 jiayo-analysis/analyzer.py 的逻辑"""
     try:
         from zhipuai import ZhipuAI
-        API_KEY = "7c406ccb126c48e28758c255b9aede76.nTXKzG8O0EKO9YE9"
+        API_KEY = os.getenv("ZHIPU_API_KEY", "7c406ccb126c48e28758c255b9aede76.nTXKzG8O0EKO9YE9")
         client = ZhipuAI(api_key=API_KEY)
     except ImportError:
         raise HTTPException(status_code=500, detail="zhipuai 未安装，请运行: pip install zhipuai")
