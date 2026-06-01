@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -27,7 +27,7 @@ JIAYO_DIR       = BASE_DIR / "jiayo-analysis"
 NEWS_DIR        = Path("D:/iquant_data/data_v2/news_major1")
 
 PRED_FILE_004 = BASE_DIR / "research/study_004_1d_release/predictions/predictions_1d_open_wf_monthly.parquet"
-PRED_FILE_005 = BASE_DIR / "research/study_005_1d_advanced/predictions/predictions_005_wf.parquet"
+PRED_FILE_005 = BASE_DIR / "research/study_005_1d_advanced/predictions/predictions_005_options_wf.parquet"
 
 # ───────────────────────────── 参数 ─────────────────────────────────
 MAX_POSITIONS   = 3
@@ -39,6 +39,20 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="Quant Local Engine API", version="1.1.0")
+
+def sync_options_data():
+    try:
+        from data.update_options_data import main as sync_options
+        logger.info("Auto-syncing options PCR data...")
+        sync_options()
+        logger.info("Options PCR data synced successfully.")
+    except Exception as e:
+        logger.error(f"Failed to auto-sync options PCR data: {e}")
+
+@app.on_event("startup")
+def startup_event():
+    logger.info("API server started. Running initial options data sync...")
+    sync_options_data()
 
 app.add_middleware(
     CORSMiddleware,
@@ -141,9 +155,44 @@ def get_signals_for_date(date_norm: str, strategy: str = "conservative") -> dict
             "entry_price": round(float(ep), 2) if ep else None,
             "action":      f"T+1 以开盘价买入{extra_info}",
             "stop_loss":   f"{STOP_LOSS*100:.0f}%",
-            "take_profit": f"+6% 回落移动止盈" if is_conservative else f"+{TAKE_PROFIT*100:.0f}%",
+            "take_profit": f"+6% 固定止盈" if is_conservative else f"+{TAKE_PROFIT*100:.0f}%",
         })
-    return {"signals": results, "is_fallback": is_fallback}
+
+    # Extra: Rules Text & Top 10 Before Filtering
+    rules_text = (
+        "1. 筛选基础: 上涨概率 prob_up >= 50% \n"
+        "2. 风控防御: 暴跌防守概率 prob_crash <= 15% \n"
+        "3. 板块限额: 同一行业板块最多推荐 2 只股票 (分散行业风险) \n"
+        "4. 仓位控制: 每日最多买入推荐前 3 只股票 (Max Positions = 3)"
+    ) if is_conservative else (
+        "1. 筛选基础: 预测概率 prob >= 50% \n"
+        "2. 仓位控制: 每日最多买入推荐前 3 只股票 (Max Positions = 3)"
+    )
+
+    score_col = "prob_up" if is_conservative else "prob"
+    top10_raw = today.nlargest(10, score_col)
+    top10_results = []
+    for idx, (_, row) in enumerate(top10_raw.iterrows(), 1):
+        ep = row["entry_price"] if pd.notna(row["entry_price"]) else None
+        prob_val = float(row[score_col])
+        extra = f"行业: {row.get('industry', 'Unknown')}"
+        if is_conservative:
+            extra += f" | 暴跌概率: {float(row['prob_crash']):.1%}"
+            
+        top10_results.append({
+            "rank":        idx,
+            "ts_code":     row["ts_code"],
+            "prob":        round(prob_val, 4),
+            "entry_price": round(float(ep), 2) if ep else None,
+            "info":        extra,
+        })
+
+    return {
+        "signals": results, 
+        "is_fallback": is_fallback,
+        "rules": rules_text,
+        "top10_raw": top10_results
+    }
 
 
 def extract_content_from_html(html: str) -> tuple[str, str]:
@@ -267,7 +316,15 @@ def get_signals(date: str, strategy: str = "conservative"):
     sigs = result["signals"]
     is_fb = result["is_fallback"]
     no_data = result.get("no_data", False)
-    resp = {"status": "ok", "date": date_norm, "strategy": strategy, "signals": sigs, "signal_count": len(sigs)}
+    resp = {
+        "status": "ok", 
+        "date": date_norm, 
+        "strategy": strategy, 
+        "signals": sigs, 
+        "signal_count": len(sigs),
+        "rules": result.get("rules", ""),
+        "top10_raw": result.get("top10_raw", [])
+    }
     if no_data:
         resp["warning"] = f"日期 {date_norm} 无预测数据"
     elif is_fb:
@@ -379,6 +436,8 @@ async def run_pipeline(payload: PipelineRequest):
         "steps": steps,
         "signal_count": len(sigs),
         "results": sigs,
+        "rules": result.get("rules", ""),
+        "top10_raw": result.get("top10_raw", [])
     }
     if no_data:
         resp["warning"] = f"日期 {date_norm} 无预测数据"
@@ -387,10 +446,26 @@ async def run_pipeline(payload: PipelineRequest):
     return resp
 
 
+def run_retrain_task():
+    logger.info("Background options model retrain task started...")
+    try:
+        from run_retrain_with_options import run_retrain
+        success = run_retrain()
+        if success:
+            logger.info("Background options model retrain completed successfully!")
+        else:
+            logger.error("Background options model retrain failed.")
+    except Exception as e:
+        logger.error(f"Error during background options model retrain: {e}")
+
 @app.post("/api/v1/retrain/trigger")
-async def trigger_retrain():
-    """后台触发月度 retrain（异步，预计 30-60 分钟）"""
-    return {"status": "started", "msg": "Retrain endpoint temporarily disabled during refactor"}
+async def trigger_retrain(background_tasks: BackgroundTasks):
+    """后台触发量化模型重训（异步，串联期权同步、特征构建与滚动重训）"""
+    background_tasks.add_task(run_retrain_task)
+    return {
+        "status": "started",
+        "msg": "Option-enhanced model retraining has been triggered in the background. It will sync PCR data, rebuild features, and retrain XGBoost models."
+    }
 
 
 # ─────────────────────── 启动入口 ───────────────────────────────────
