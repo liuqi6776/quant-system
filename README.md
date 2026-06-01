@@ -109,7 +109,8 @@ trainer.train(df)
 * **📂 [research/study_005_1d_advanced/](research/study_005_1d_advanced/)**：Study 005 进阶版 Baseline 模型研究线：
   * **[step3_backtest_advanced.py](research/study_005_1d_advanced/scripts/step3_backtest_advanced.py)**：**【核心回测代码】Baseline 进阶版严格 T+1 回测器**。
   * **[005_advanced_results.png](research/study_005_1d_advanced/results/005_advanced_results.png)**：**【回测结果图】Baseline 进阶版回撤热力图与净值图**。
-* **⏰ 全自动定时晨报与调度器**：
+* **⏰ 全自动定时晨报与调度器及实盘交易端：**
+  * **[ptrade_client_v5.py](ptrade_client_v5.py)**：**【核心实盘代码】PTrade 恒生柜台全自动交易主程序（已解决账户自动对账、流动性 ADV 1% 过滤、ST/次新内容审计三大实盘风险）**。
   * **[daily_morning_pipeline.py](daily_morning_pipeline.py)**：每日 8:00 NLP 新闻打分与选股信号邮件自动推送主程序。
   * **[run_morning_pipeline.bat](run_morning_pipeline.bat)**：Windows 计划任务专用定时启动批处理与日志重定向脚本。
   * **[run_retrain_with_options.py](run_retrain_with_options.py)**：一键式“同步->特征重构->双模型重训”主调度脚本。
@@ -125,6 +126,7 @@ trainer.train(df)
 2. **第二步：审计回测引擎平仓逻辑** —— 打开 **[backtest_options_model.py](research/期权/backtest_options_model.py) (第 180 - 233 行)**。重点核验 `hold2` 卖出逻辑中如何进行开盘止损判定、Worst-Case 日内多空冲突判定、以及一字跌停锁仓顺延，验证有无任何“未来收盘价”的窥探。
 3. **第三步：核验期权超额 Alpha 的真实性** —— 对照 **[model_options_comparison.png](research/期权/results/model_options_comparison.png)** 中的 Baseline 曲线与期权增强型曲线。在剥离所有未来函数后，验证期权特征使全周期（2022-2026）夏普比率从 **2.33 提升至 3.08**，最大回撤锁定在 **-8.3%** 的卓越表现。
 4. **第四步：核验实盘风控与部署逻辑** —— 打开 **[api_server.py](api_server.py) (第 116 - 128 行)**。查看 API 接口层如何实施 `prob_crash <= 15%` 双模型熔断，以及如何执行单行业板块最多推荐 2 只股票的行业中性化限制，确保实盘交易的资金安全性。
+5. **第五步：审计实盘全自动交易系统** —— 打开 **[ptrade_client_v5.py](ptrade_client_v5.py)**。核验 `before_market_start` 盘前对账状态机与 ST/次新审计防线、`execute_morning_buy` 开盘一字涨停避险、以及 `intraday_risk_control` 盘中逐 Bar 硬性止盈/止损出场机制，验证其实盘部署的安全性。
 
 ---
 
