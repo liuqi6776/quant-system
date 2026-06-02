@@ -74,7 +74,7 @@ def main():
     # fill options data, and then merge back, which is 100x faster than doing groupby(ts_code)!
     # Let's create a trade-date level options lookup and forward fill it, then merge!
     df_opts_unique = df_merged[['trade_date'] + opt_cols].drop_duplicates().sort_values('trade_date').reset_index(drop=True)
-    df_opts_unique[opt_cols] = df_opts_unique[opt_cols].ffill().bfill()
+    df_opts_unique[opt_cols] = df_opts_unique[opt_cols].ffill().fillna(0)
     
     # Drop original options columns from df_merged and merge the filled unique ones
     df_merged = df_merged.drop(columns=opt_cols, errors='ignore')

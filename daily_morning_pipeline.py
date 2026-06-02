@@ -268,6 +268,68 @@ def is_today_trading_day():
         print(f"[WARNING] Failed to fetch trading calendar: {e}. Defaulting to allowing weekdays.")
         return True
 
+def get_t_minus_1_date():
+    import akshare as ak
+    from datetime import datetime
+    now = datetime.now()
+    try:
+        df_cal = ak.tool_trade_date_hist_sina()
+        today_str = now.strftime('%Y-%m-%d')
+        df_cal['trade_date'] = pd.to_datetime(df_cal['trade_date']).dt.strftime('%Y-%m-%d')
+        trading_dates = sorted(df_cal['trade_date'].tolist())
+        
+        prior_dates = [d for d in trading_dates if d < today_str]
+        if prior_dates:
+            return prior_dates[-1].replace('-', '')
+    except Exception as e:
+        print(f"[WARNING] Failed to fetch T-1 date from Sina: {e}")
+    
+    from datetime import timedelta
+    target = now - timedelta(days=1)
+    if target.weekday() == 5:
+        target = target - timedelta(days=1)
+    elif target.weekday() == 6:
+        target = target - timedelta(days=2)
+    return target.strftime('%Y%m%d')
+
+def get_stock_name_map():
+    """获取本地缓存或在线拉取的股票 Ticker -> Name 映射表"""
+    cache_path = os.path.join(ROOT_DIR, "stock_name_map.parquet")
+    if os.path.exists(cache_path):
+        try:
+            df = pd.read_parquet(cache_path)
+            return dict(zip(df['ts_code'], df['name']))
+        except Exception:
+            pass
+
+    print("[INFO] Fetching stock list for Ticker-to-Name mapping...")
+    try:
+        from infra_data.fetcher import DataFetcher
+        fetcher = DataFetcher()
+        df_basic = fetcher.get_stock_list()
+        if df_basic is not None and not df_basic.empty:
+            df_basic = df_basic[['ts_code', 'name']].drop_duplicates()
+            df_basic.to_parquet(cache_path)
+            print(f"[SUCCESS] Ticker-to-Name mapping cached to {cache_path}")
+            return dict(zip(df_basic['ts_code'], df_basic['name']))
+    except Exception as e:
+        print(f"[WARNING] Failed to fetch online stock list mapping: {e}")
+        
+    return {}
+
+def pre_trade_audit(row):
+    """Pre-Trade Audit: 过滤面值退市股、筹码冻结股与极端崩盘异常股"""
+    # 1. 过滤低于 1.5 元的仙股（避免面值退市风险）
+    if row.get('close', 0) < 1.5:
+        return False, "股价低于1.5元(仙股/退市风险)"
+    # 2. 过滤单日暴跌幅度超过 11% 的异常股（如异常复牌或严重踩雷）
+    if row.get('pct_chg', 0) < -11.0:
+        return False, f"单日异常暴跌 {row.get('pct_chg', 0):.2f}%"
+    # 3. 过滤每日流动性过低的股票（成交额低于 500 万人民币）
+    if row.get('amount', 0) < 5000:
+        return False, "成交额低于 500 万元(流动性匮乏)"
+    return True, "通过审核"
+
 def run_pipeline_and_send_email():
     print(f"=== Starting Daily Pipeline Run: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ===")
     
@@ -279,33 +341,76 @@ def run_pipeline_and_send_email():
     # 1. Sync PCR & News dynamically
     sync_all_data()
 
-    # 2. Query Signals from API locally
-    # We can load predictions_005_options_wf.parquet directly for robust CLI execution
-    pred_path = os.path.join(ROOT_DIR, "research", "study_005_1d_advanced", "predictions", "predictions_005_options_wf.parquet")
-    if not os.path.exists(pred_path):
-        print(f"[ERROR] Prediction file not found at: {pred_path}")
-        return
-
+    # 1.5. Calculate T-1 date & fetch raw data
+    t_minus_1_date = get_t_minus_1_date()
+    print(f"[INFO] T-1 trading date determined: {t_minus_1_date}")
+    
+    print(f"[INFO] Fetching daily raw data for {t_minus_1_date}...")
     try:
-        df = pd.read_parquet(pred_path)
-        df['trade_date'] = df['trade_date'].astype(str)
-        latest_date = df['trade_date'].max()
-        print(f"[INFO] Latest prediction date available in Parquet: {latest_date}")
+        import subprocess
+        subprocess.run([sys.executable, "fetch_latest_data.py", t_minus_1_date], check=True)
+        print(f"[SUCCESS] Raw data fetched successfully.")
+    except Exception as e:
+        print(f"[WARNING] Failed to fetch daily raw data: {e}")
+
+    # 2. Run real-time prediction
+    print(f"[INFO] Running real-time daily dragon predictions for {t_minus_1_date}...")
+    try:
+        from daily_dragon_predict import predict_for_date
+        picks_top3, picks_top10 = predict_for_date(t_minus_1_date)
         
-        # Load local api get_signals logic to get formatted data
-        from api_server import get_signals_for_date
-        result = get_signals_for_date(latest_date, strategy="conservative")
-        
-        filtered_sigs = result["signals"]
-        top10_raw = result["top10_raw"]
-        rules = result["rules"]
+        if picks_top10 is None or picks_top10.empty:
+            print("[ERROR] Prediction failed or returned empty results.")
+            return
+
+        # 获取股票名称映射表
+        name_map = get_stock_name_map()
+
+        filtered_sigs = []
+        top10_raw = []
+
+        # 3. Apply Pre-Trade Audit / Double-Model Shield Filter
+        idx = 1
+        for _, row in picks_top10.iterrows():
+            passed, reason = pre_trade_audit(row)
+            ts_code = row["ts_code"]
+            name = name_map.get(ts_code, "未知名称")
+            display_name = f"{ts_code} ({name})"
+            
+            # Format top10_raw
+            top10_raw.append({
+                "rank":        idx,
+                "ts_code":     display_name,
+                "prob":        round(float(row["prob"]), 4),
+                "entry_price": round(float(row["close"]), 2) if pd.notna(row["close"]) else None,
+                "info":        f"昨日涨跌: {row['pct_chg']:.2f}% | 流通市值: {row['circ_mv']/10000:.2f}亿 | 舆情权重: {row['news_stock_impact']:.1f} | 审计: {reason}",
+            })
+            
+            # If passed and we haven't reached max positions, add to filtered signals
+            if passed and len(filtered_sigs) < 3:
+                filtered_sigs.append({
+                    "ts_code":     display_name,
+                    "prob":        round(float(row["prob"]), 4),
+                    "entry_price": round(float(row["close"]), 2) if pd.notna(row["close"]) else None,
+                    "action":      f"T+1 以开盘价买入 | 昨收 ¥{row['close']:.2f} ({row['pct_chg']:.2f}%) | 舆情评分: {row['news_stock_impact']:.1f}",
+                    "stop_loss":   "-5%",
+                    "take_profit": "+6% 固定止盈"
+                })
+            idx += 1
+
+        rules = (
+            "1. 筛选基础: XGBoost 实时上涨概率高分排序\n"
+            "2. 审计过滤: 排除股价 < ¥1.5 的面值退市风险股，排除单日暴跌 > 11% 异常复牌股\n"
+            "3. 仓位控制: 每日最多买入推荐前 3 只股票 (Max Positions = 3)\n"
+            "4. 风控管理: 严格执行 -5% 止损 与 +6% 固定止盈离场策略"
+        )
         
         # Get options indicators
         opt = get_latest_pcr_indicators()
         
         # Generate HTML content
         html_body = build_html_report(
-            date_str=f"{latest_date[:4]}-{latest_date[4:6]}-{latest_date[6:8]}",
+            date_str=f"{t_minus_1_date[:4]}-{t_minus_1_date[4:6]}-{t_minus_1_date[6:8]}",
             rules=rules,
             filtered_sigs=filtered_sigs,
             top10_raw=top10_raw,
@@ -322,7 +427,6 @@ def run_pipeline_and_send_email():
         if not password:
             print("[ERROR] SMTP_PASSWORD is not configured in .env!")
             print("Please add 'SMTP_PASSWORD=<your_qq_mail_authorization_code>' to your .env file.")
-            print("You can get your authorization code in QQ Mailbox Settings -> Accounts -> POP3/IMAP/SMTP/Exchange.")
             return
 
         subject = f"【量化晨报】A股期权增强型选股信号建议 ({datetime.now().strftime('%m-%d')})"
@@ -334,7 +438,6 @@ def run_pipeline_and_send_email():
         msg.attach(MIMEText(html_body, 'html'))
         
         server = smtplib.SMTP_SSL(smtp_server, smtp_port)
-        # For 163 Mail, the login user is usually the short username before '@'
         login_user = sender_email.split("@")[0] if "163.com" in sender_email else sender_email
         print(f"[INFO] Logging in SMTP server as: {login_user}")
         server.login(login_user, password)

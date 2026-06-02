@@ -224,7 +224,10 @@ def analyze_with_zhipu(title: str, content: str) -> Optional[dict]:
     """调用 ZhipuAI GLM 分析文章，复用 jiayo-analysis/analyzer.py 的逻辑"""
     try:
         from zhipuai import ZhipuAI
-        API_KEY = os.getenv("ZHIPU_API_KEY", "7c406ccb126c48e28758c255b9aede76.nTXKzG8O0EKO9YE9")
+        API_KEY = os.getenv("ZHIPU_API_KEY")
+        if not API_KEY:
+            logger.error("ZHIPU_API_KEY is not set in environment!")
+            return None
         client = ZhipuAI(api_key=API_KEY)
     except ImportError:
         raise HTTPException(status_code=500, detail="zhipuai 未安装，请运行: pip install zhipuai")

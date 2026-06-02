@@ -255,7 +255,7 @@ def before_market_start(context, data):
             last_price = data[ptrade_code].close
             
             # 最大订单股数限制：不得超过 ADV20 的 1%
-            max_allowed_shares = int(adv20_shares * g_config['max_adv_pct'] / 100) * 100
+            max_allowed_shares = int(adv20_shares * g_config['max_adv_pct']) // 100 * 100
             
             # 拟下单股数计算：基于分配资金
             planned_shares = int(target_pos_value / last_price / 100) * 100
@@ -405,7 +405,7 @@ def intraday_risk_control(context, data):
         if pnl_pct <= g_config['stop_loss_pct']:
             log.warn(f"  [STOP LOSS TRIGGERED] {code} | Current: ¥{current_price:.2f} | Cost: ¥{cost_price:.2f} | PnL: {pnl_pct:.2%} <= {g_config['stop_loss_pct']:.2%}")
             log.warn(f"  Dispatching STOP LOSS sell order immediately for {code} | Volume: {sellable_amount} shares.")
-            order_target(code, 0, LimitOrderStyle(current_price))
+            order_target(code, 0, MarketOrderStyle())
             send_wechat_notification(
                 f"🔴 【实盘止损触发】清仓平仓：{code}",
                 f"持仓个股跌破硬性止损底线，已为您发出秒级清仓止损单！\n\n"
@@ -420,7 +420,7 @@ def intraday_risk_control(context, data):
         if pnl_pct >= g_config['take_profit_pct']:
             log.info(f"  [TAKE PROFIT TRIGGERED] {code} | Current: ¥{current_price:.2f} | Cost: ¥{cost_price:.2f} | PnL: {pnl_pct:.2%} >= {g_config['take_profit_pct']:.2%}")
             log.info(f"  Dispatching TAKE PROFIT sell order immediately for {code} | Volume: {sellable_amount} shares.")
-            order_target(code, 0, LimitOrderStyle(current_price))
+            order_target(code, 0, MarketOrderStyle())
             send_wechat_notification(
                 f"🟢 【实盘止盈触发】止盈落袋：{code}",
                 f"持仓个股冲高达到止盈目标，已为您发出秒级止盈落袋清仓单！\n\n"

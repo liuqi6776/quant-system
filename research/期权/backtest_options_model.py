@@ -257,13 +257,19 @@ def main():
     print("\n>>> Backtesting Baseline Model (No Options)...")
     pred_base = pd.read_parquet(PRED_FILE_BASE)
     pred_base['ds'] = pred_base['trade_date'].astype(str)
-    pnl_base, stats_base = run_backtest(pred_base, ohlc, pctchg, regime_map, P)
+    P_base = P.copy()
+    P_base['th_up'] = 0.50
+    P_base['th_crash'] = 0.15
+    pnl_base, stats_base = run_backtest(pred_base, ohlc, pctchg, regime_map, P_base)
 
     # 2. Backtest Options Model
     print("\n>>> Backtesting Option-Enhanced Model...")
     pred_opt = pd.read_parquet(PRED_FILE_OPT)
     pred_opt['ds'] = pred_opt['trade_date'].astype(str)
-    pnl_opt, stats_opt = run_backtest(pred_opt, ohlc, pctchg, regime_map, P)
+    P_opt = P.copy()
+    P_opt['th_up'] = 0.50
+    P_opt['th_crash'] = 0.45  # Optimized threshold due to distribution shift in Option Model's prob_crash
+    pnl_opt, stats_opt = run_backtest(pred_opt, ohlc, pctchg, regime_map, P_opt)
 
     print("\n================== [ Performance Comparison ] ==================")
     results_base, results_opt = {}, {}
