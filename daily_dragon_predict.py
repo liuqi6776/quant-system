@@ -132,12 +132,22 @@ def predict_for_date(target_date):
     print(f"  个股新闻数量: {len(news_stock_dict)}")
     
     p_rank = os.path.join(RANK_DIR, f"{target_date}.parquet")
+    if not os.path.exists(p_rank):
+        print(f"警告: 今日同花顺热度数据不存在，尝试使用前一日热度数据")
+        dates = sorted([f.replace('.parquet', '') for f in os.listdir(RANK_DIR) if f.endswith('.parquet') and f < target_date])
+        if dates:
+            p_rank = os.path.join(RANK_DIR, f"{dates[-1]}.parquet")
+            print(f"  使用历史热度数据: {dates[-1]}")
+        else:
+            print("错误: 没有可用的历史热度数据")
+            return None, None
+
     p_chip = os.path.join(CHIP_DIR, f"{target_date}.parquet")
     p_price = os.path.join(PRICE_DIR, f"{target_date}.parquet")
     p_other = os.path.join(OTHER_DIR, f"{target_date}.parquet")
     
-    if not all(os.path.exists(p) for p in [p_rank, p_price, p_other]):
-        print(f"错误: 缺少数据文件")
+    if not all(os.path.exists(p) for p in [p_price, p_other]):
+        print(f"错误: 缺少核心行情或基本面数据文件")
         return None, None
     
     if not os.path.exists(p_chip):
