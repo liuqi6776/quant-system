@@ -29,7 +29,7 @@ os.makedirs(RESULTS_DIR, exist_ok=True)
 # ── 交易参数 ──────────────────────────────────────────────────────────
 P = {
     'th_up':       0.50,
-    'th_crash':    0.15,
+    'th_crash':    0.45,
     'max_pos':     3,
     'gap_low':     0.02,
     'gap_high':    0.06,
