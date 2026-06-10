@@ -71,49 +71,81 @@ def run():
         if train_end.endswith('00'):
             train_end = f"{int(train_end[:4])-1}12"
 
-        train_mask = (df['ds'] >= TRAIN_START) & (df['ds'].str[:6] <= train_end) & df['return_1d_open'].notna()
+        # 12-month rolling training window (1 year) to keep training size highly optimal and adapt to fast regime shifts
+        year = int(train_end[:4])
+        month_val = int(train_end[4:6])
+        start_year = year - 1
+        start_month = month_val + 1
+        if start_month > 12:
+            start_month -= 12
+            start_year += 1
+        rolling_start = f"{start_year}{start_month:02d}01"
+
+        train_mask = (df['ds'] >= rolling_start) & (df['ds'].str[:6] <= train_end) & df['return_1d_open'].notna()
         pred_mask = df['ds'].str[:6] == month
 
         train_df = df.loc[train_mask, feature_cols + ['ds', 'label_up', 'label_crash']].copy()
         pred_df = df.loc[pred_mask, feature_cols + ['trade_date', 'ts_code', 'return_1d_open', 'next_open', 'industry']].copy()
 
-        if len(train_df) < 50000 or len(pred_df) == 0:
+        if len(train_df) < 10000 or len(pred_df) == 0:
             continue
 
         X_train = train_df[feature_cols].fillna(0)
         y_up = train_df['label_up']
         y_crash = train_df['label_crash']
         
-        # --- Time-decayed Sample Weight 计算 ---
-        # 假设当前预测月的第一天，或者简单用 train_end 的最后一天作为参考点
-        # 为了计算简单，给每个样本分配一个相对日期序号 (基于行索引或简单按时间戳)
+        # Time-decayed weights calculated directly on train_df
         train_dates = pd.to_datetime(train_df['ds'], format='%Y%m%d')
         ref_date = train_dates.max()
         days_diff = (ref_date - train_dates).dt.days
-        # 指数衰减权重: exp(-lambda * t) where lambda = ln(2) / half_life
         decay_lambda = np.log(2) / HALF_LIFE_DAYS
-        sample_weights = np.exp(-decay_lambda * days_diff).values
-        # Normalize weights to have mean=1 so learning rate behaves consistently
-        sample_weights = sample_weights / sample_weights.mean()
+        # High-performance Series mapping aligned with indices
+        sample_weights_series = pd.Series(np.exp(-decay_lambda * days_diff).values, index=train_df.index)
+        sample_weights_series = sample_weights_series / sample_weights_series.mean()
 
-        # Model 1: UP Model
+        # Downsample Negatives for UP Model (1 pos : 2 negs) - instant index mapping
+        pos_up_idx = y_up[y_up == 1].index
+        neg_up_idx = y_up[y_up == 0].index
+        if len(pos_up_idx) > 0 and len(neg_up_idx) > 0:
+            sampled_neg_up = y_up[neg_up_idx].sample(min(len(pos_up_idx) * 2, len(neg_up_idx)), random_state=42).index
+            train_up_idx = pos_up_idx.union(sampled_neg_up)
+            X_train_up = X_train.loc[train_up_idx]
+            y_up_bal = y_up.loc[train_up_idx]
+            weights_up = sample_weights_series.loc[train_up_idx].values
+            weights_up = weights_up / weights_up.mean()
+        else:
+            X_train_up, y_up_bal, weights_up = X_train, y_up, sample_weights_series.values
+
+        # Downsample Negatives for CRASH Model (1 pos : 2 negs) - instant index mapping
+        pos_crash_idx = y_crash[y_crash == 1].index
+        neg_crash_idx = y_crash[y_crash == 0].index
+        if len(pos_crash_idx) > 0 and len(neg_crash_idx) > 0:
+            sampled_neg_crash = y_crash[neg_crash_idx].sample(min(len(pos_crash_idx) * 2, len(neg_crash_idx)), random_state=43).index
+            train_crash_idx = pos_crash_idx.union(sampled_neg_crash)
+            X_train_crash = X_train.loc[train_crash_idx]
+            y_crash_bal = y_crash.loc[train_crash_idx]
+            weights_crash = sample_weights_series.loc[train_crash_idx].values
+            weights_crash = weights_crash / weights_crash.mean()
+        else:
+            X_train_crash, y_crash_bal, weights_crash = X_train, y_crash, sample_weights_series.values
+
+        # Model 1: UP Model (trained on balanced data)
         model_up = XGBClassifier(
             n_estimators=100, max_depth=5, learning_rate=0.1,
             subsample=0.8, colsample_bytree=0.8,
-            random_state=42, n_jobs=4, eval_metric='logloss',
+            random_state=42, n_jobs=-1, eval_metric='logloss',
             tree_method='hist'
         )
-        model_up.fit(X_train, y_up, sample_weight=sample_weights, verbose=False)
+        model_up.fit(X_train_up, y_up_bal, sample_weight=weights_up, verbose=False)
         
-        # Model 2: CRASH Model
+        # Model 2: CRASH Model (trained on balanced data)
         model_crash = XGBClassifier(
-            n_estimators=80, max_depth=4, learning_rate=0.1, # Crash模型稍微浅一点防过拟合
+            n_estimators=80, max_depth=4, learning_rate=0.1,
             subsample=0.8, colsample_bytree=0.8,
-            scale_pos_weight=1.0, # 虽然极不平衡，但我们看绝对概率，先不平衡
-            random_state=43, n_jobs=4, eval_metric='logloss',
+            random_state=43, n_jobs=-1, eval_metric='logloss',
             tree_method='hist'
         )
-        model_crash.fit(X_train, y_crash, sample_weight=sample_weights, verbose=False)
+        model_crash.fit(X_train_crash, y_crash_bal, sample_weight=weights_crash, verbose=False)
 
         X_pred = pred_df[feature_cols].fillna(0)
         prob_up = model_up.predict_proba(X_pred)[:, 1]
@@ -133,7 +165,7 @@ def run():
         elapsed = time.time() - mt0
         total = time.time() - t0
         remaining = (total / (i + 1)) * (len(pred_months) - i - 1)
-        print(f"[{i+1}/{len(pred_months)}] {month}: train={len(train_df)}, "
+        print(f"[{i+1}/{len(pred_months)}] {month}: train_up={len(X_train_up)}, train_crash={len(X_train_crash)}, "
               f"up_pos={y_up.mean():.1%}, crash_pos={y_crash.mean():.1%}, "
               f"elapsed={elapsed:.0f}s, rem~{remaining/60:.0f}m", flush=True)
 

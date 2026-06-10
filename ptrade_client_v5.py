@@ -457,7 +457,7 @@ def load_local_fallback_signals(date_norm):
             return []
             
         # 复刻 api_server 的 signals 提取过滤算法 (Double Model风控 + 板块超额过滤)
-        above = today[(today['prob_up'] >= 0.50) & (today['prob_crash'] <= 0.15)].copy()
+        above = today[(today['prob_up'] >= 0.50) & (today['prob_crash'] <= 0.45)].copy()
         above = above.sort_values('prob_up', ascending=False)
         
         ind_counts = {}

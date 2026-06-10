@@ -259,7 +259,7 @@ def main():
     pred_base['ds'] = pred_base['trade_date'].astype(str)
     P_base = P.copy()
     P_base['th_up'] = 0.50
-    P_base['th_crash'] = 0.15
+    P_base['th_crash'] = 0.45
     pnl_base, stats_base = run_backtest(pred_base, ohlc, pctchg, regime_map, P_base)
 
     # 2. Backtest Options Model
