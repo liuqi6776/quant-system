@@ -39,6 +39,7 @@ def get_feature_cols(df):
         'open', 'high', 'low', 'close', 'pre_close',
         'change', 'pct_chg', 'vol', 'amount', 'amplitude',
         'entry_price', 'next_open',
+        'ths_hot', 'ths_hot_rank',
         'exit_price_1d', 'return_1d', 'return_1d_open',
         'exit_price_5d', 'return_5d', 'return_5d_open',
         'exit_price_28d', 'return_28d', 'return_28d_open',

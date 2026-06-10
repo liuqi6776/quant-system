@@ -108,7 +108,7 @@ def calculate_ic_metrics(df, target_col, restrict_to_ths_dates=False, ths_dates=
             
         ic_mean = daily_ic.mean()
         ic_std = daily_ic.std()
-        ic_ir = ic_mean / ic_std * np.sqrt(252) if ic_std > 0 else 0
+        ic_ir = ic_mean / ic_std if ic_std > 0 else 0
         ic_pos_ratio = (daily_ic > 0).mean()
         
         ic_results.append({

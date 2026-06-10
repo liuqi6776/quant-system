@@ -53,7 +53,7 @@ def is_limit_down(row, code=None):
 def simulate_strategy(df, df_by_date, trade_dates, rebalance_dates, use_options_filter=True):
     print(f"\n>>> Running Simulation (Options Filter: {use_options_filter}) ...", flush=True)
     
-    current_holdings = {}  # {ts_code: cash_value}
+    current_holdings = {}  # {ts_code: {'val': val, 'buy_price': buy_price, 'is_first_day': bool}}
     cash = INITIAL_CAPITAL
     daily_navs = []
     
@@ -70,16 +70,38 @@ def simulate_strategy(df, df_by_date, trade_dates, rebalance_dates, use_options_
         holdings_val = 0
         if current_holdings:
             updated_holdings = {}
-            for code, prev_val in current_holdings.items():
+            for code, prev_item in current_holdings.items():
+                prev_val = prev_item['val']
                 if code in day_prices:
                     pct_chg = day_prices[code]['pct_chg']
                     if pd.isna(pct_chg):
                         pct_chg = 0.0
-                    val = prev_val * (1 + pct_chg)
-                    updated_holdings[code] = val
+                    
+                    if prev_item['is_first_day']:
+                        # 买入首日：使用 收盘价 / 买入开盘价 乘以初始买入市值
+                        close_price = day_prices[code]['close']
+                        buy_price = prev_item['buy_price']
+                        if buy_price > 0:
+                            val = prev_val * (close_price / buy_price)
+                        else:
+                            val = prev_val * (1 + pct_chg)
+                    else:
+                        # 后续持仓日：使用 pct_chg (昨收 -> 今收) 更新
+                        val = prev_val * (1 + pct_chg)
+                        
+                    updated_holdings[code] = {
+                        'val': val,
+                        'buy_price': None,
+                        'is_first_day': False
+                    }
                     holdings_val += val
                 else:
-                    updated_holdings[code] = prev_val
+                    # 停牌：市值保持不变，is_first_day 状态也保留
+                    updated_holdings[code] = {
+                        'val': prev_val,
+                        'buy_price': prev_item['buy_price'],
+                        'is_first_day': prev_item['is_first_day']
+                    }
                     holdings_val += prev_val
             current_holdings = updated_holdings
             
@@ -109,10 +131,11 @@ def simulate_strategy(df, df_by_date, trade_dates, rebalance_dates, use_options_
                 
             next_day_prices = df_by_date[next_dt].set_index('ts_code').to_dict(orient='index')
             
-            # 统计被迫持仓
+            # A. 统计被迫持仓
             sell_candidates = []
             forced_holdings = {}
-            for code, val in current_holdings.items():
+            for code, prev_item in current_holdings.items():
+                val = prev_item['val']
                 untradeable = False
                 if code not in next_day_prices:
                     untradeable = True
@@ -121,22 +144,26 @@ def simulate_strategy(df, df_by_date, trade_dates, rebalance_dates, use_options_
                     if row['vol'] == 0 or is_limit_down(row, code):
                         untradeable = True
                 if untradeable:
-                    forced_holdings[code] = val
+                    forced_holdings[code] = {
+                        'val': val,
+                        'buy_price': None,
+                        'is_first_day': False
+                    }
                 else:
                     sell_candidates.append(code)
             
-            # B. 恐慌状态：不买新仓
+            # B. 恐慌状态：不买新仓，只保留被迫持仓
             if is_panic:
                 for code in sell_candidates:
-                    val = current_holdings[code]
+                    val = current_holdings[code]['val']
                     cost = val * SELL_COST_RATE
                     cash += (val - cost)
                 current_holdings = forced_holdings
                 continue
                 
-            # C. 正常调仓
+            # C. 正常调仓：卖出可卖仓位
             for code in sell_candidates:
-                val = current_holdings[code]
+                val = current_holdings[code]['val']
                 cost = val * SELL_COST_RATE
                 cash += (val - cost)
                 
@@ -170,23 +197,27 @@ def simulate_strategy(df, df_by_date, trade_dates, rebalance_dates, use_options_
                 ind = row['industry']
                 count = industry_counts.get(ind, 0)
                 if count < max_stocks_per_industry:
-                    selected_codes.append(code)
+                    selected_codes.append((code, row['next_open']))  # 保存代码与执行买价
                     industry_counts[ind] = count + 1
                     
             total_target_stocks = len(selected_codes) + len(forced_holdings)
             if total_target_stocks > 0:
-                total_val = cash + sum(forced_holdings.values())
-                new_holdings = {code: val for code, val in forced_holdings.items()}
+                total_val = cash + sum(item['val'] for item in forced_holdings.values())
+                new_holdings = {code: item for code, item in forced_holdings.items()}
                 
                 if len(selected_codes) > 0:
                     buy_value_per_stock = cash / len(selected_codes)
-                    for code in selected_codes:
+                    for code, buy_price in selected_codes:
                         cost = buy_value_per_stock * BUY_COST_RATE
-                        new_holdings[code] = buy_value_per_stock - cost
+                        new_holdings[code] = {
+                            'val': buy_value_per_stock - cost,
+                            'buy_price': buy_price,
+                            'is_first_day': True
+                        }
                     cash = 0.0
                 current_holdings = new_holdings
             else:
-                current_holdings = {code: val for code, val in forced_holdings.items()}
+                current_holdings = {code: item for code, item in forced_holdings.items()}
                 
     nav_df = pd.DataFrame(daily_navs)
     nav_df['trade_date'] = pd.to_datetime(nav_df['trade_date'])
@@ -252,16 +283,34 @@ def run_backtest():
     bench_returns.index = pd.to_datetime(bench_returns.index)
     bench_nav = (1 + bench_returns).cumprod() * INITIAL_CAPITAL
     
+    # 加载中证1000基准 (from index_regime.csv)
+    index_file = os.path.join(DATA_DIR, 'index_regime.csv')
+    if os.path.exists(index_file):
+        print("Loading CSI 1000 index as benchmark...", flush=True)
+        idx_df = pd.read_csv(index_file)
+        idx_df['trade_date'] = idx_df['trade_date'].astype(str)
+        idx_df = idx_df[idx_df['trade_date'].isin(trade_dates)].sort_values('trade_date').reset_index(drop=True)
+        idx_df['pct_chg'] = idx_df['close'].pct_change().fillna(0.0)
+        idx_df_prices = idx_df.set_index('trade_date')['pct_chg'].to_dict()
+        csi1000_returns = pd.Series([idx_df_prices.get(dt, 0.0) for dt in trade_dates], index=pd.to_datetime(trade_dates))
+        csi1000_nav = (1 + csi1000_returns).cumprod() * INITIAL_CAPITAL
+    else:
+        print("⚠️ CSI 1000 index file not found, using Equal-Weight as fallback.", flush=True)
+        csi1000_nav = bench_nav
+        
     # 对齐索引
     nav_pure['benchmark'] = bench_nav.reindex(nav_pure.index).ffill()
     nav_hedged['benchmark'] = bench_nav.reindex(nav_hedged.index).ffill()
+    nav_pure['csi1000'] = csi1000_nav.reindex(nav_pure.index).ffill()
+    nav_hedged['csi1000'] = csi1000_nav.reindex(nav_hedged.index).ffill()
     
     # 4. 计算并展示绩效指标
     metrics_pure = compute_metrics(nav_pure['nav'], 'Strategy (Pure Multi-Factor)')
     metrics_hedged = compute_metrics(nav_hedged['nav'], 'Strategy (Options Wind-Control)')
     metrics_bench = compute_metrics(nav_pure['benchmark'], 'Benchmark (Market Equal-Weight)')
+    metrics_csi1000 = compute_metrics(nav_pure['csi1000'], 'Benchmark (CSI 1000 Index)')
     
-    summary_df = pd.DataFrame([metrics_pure, metrics_hedged, metrics_bench])
+    summary_df = pd.DataFrame([metrics_pure, metrics_hedged, metrics_bench, metrics_csi1000])
     
     print("\n==========================================================================")
     print("                     Multi-Factor Strategy A/B Comparison                 ")
@@ -273,7 +322,8 @@ def run_backtest():
     results_nav = pd.DataFrame({
         'Strategy_Pure': nav_pure['nav'],
         'Strategy_Hedged': nav_hedged['nav'],
-        'Benchmark': nav_pure['benchmark']
+        'Benchmark_EqualWeight': nav_pure['benchmark'],
+        'Benchmark_CSI1000': nav_pure['csi1000']
     })
     results_nav.to_csv(os.path.join(RESULTS_DIR, 'portfolio_comparison_nav.csv'))
     summary_df.to_csv(os.path.join(RESULTS_DIR, 'portfolio_comparison_metrics.csv'), index=False)
@@ -283,11 +333,13 @@ def run_backtest():
     fig, ax = plt.subplots(figsize=(12, 7))
     
     ax.plot(results_nav.index, results_nav['Strategy_Pure'] / INITIAL_CAPITAL, 
-            label='Strategy (Pure Multi-Factor - 51 alphas)', color='#1565c0', linewidth=2.0)
+            label='Strategy (Pure Multi-Factor - 54 alphas)', color='#1565c0', linewidth=2.0)
     ax.plot(results_nav.index, results_nav['Strategy_Hedged'] / INITIAL_CAPITAL, 
             label='Strategy (Options Wind-Controlled - Risk Off)', color='#2e7d32', linewidth=2.5)
-    ax.plot(results_nav.index, results_nav['Benchmark'] / INITIAL_CAPITAL, 
+    ax.plot(results_nav.index, results_nav['Benchmark_EqualWeight'] / INITIAL_CAPITAL, 
             label='Benchmark (Market Equal-Weight)', color='#78909c', linewidth=1.5, linestyle='--')
+    ax.plot(results_nav.index, results_nav['Benchmark_CSI1000'] / INITIAL_CAPITAL, 
+            label='Benchmark (CSI 1000 Index)', color='#e65100', linewidth=1.8, linestyle='-.')
     
     ax.set_title('A-Share Multi-Factor Portfolio Backtest (2022-2026 Out-of-Sample)', fontsize=14, fontweight='bold', pad=15)
     ax.set_xlabel('Date', fontsize=12)
