@@ -1,0 +1,196 @@
+"""
+step3_train_ranking_model.py
+基于 features_longterm.parquet，进行月度滚动的 Purged Walk-Forward 训练。
+支持的回归模型：Linear (Ridge Regression) 和 XGBoost。
+清除重叠标签（Purging）以防止未来数据泄露。
+输出 -> predictions/predictions_longterm.parquet
+"""
+import os
+import sys
+import time
+import gc
+import warnings
+import pandas as pd
+import numpy as np
+from sklearn.linear_model import Ridge
+from sklearn.preprocessing import StandardScaler
+from xgboost import XGBRegressor
+
+warnings.filterwarnings('ignore')
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
+DATA_DIR = os.path.join(PROJECT_DIR, 'data')
+PRED_DIR = os.path.join(PROJECT_DIR, 'predictions')
+os.makedirs(PRED_DIR, exist_ok=True)
+
+FEATURES_FILE = os.path.join(DATA_DIR, 'features_longterm.parquet')
+OUTPUT_FILE = os.path.join(PRED_DIR, 'predictions_longterm.parquet')
+
+# 配置参数
+TARGET_COL = 'mkt_excess_ret_10d'  # 10日市场超额收益为目标
+HOLDING_DAYS = 10                  # 持有期为10天，清除训练期最后10天数据
+MODEL_TYPE = 'linear'              # 'linear' (Ridge) 或 'xgb'
+RIDGE_ALPHA = 100.0                # 线性模型正则化强度
+
+def get_feature_cols(df):
+    exclude_cols = {
+        'ts_code', 'trade_date', 'ds', 'industry',
+        'open', 'high', 'low', 'close', 'pre_close',
+        'change', 'pct_chg', 'vol', 'amount', 'amplitude',
+        'entry_price', 'next_open',
+        'exit_price_1d', 'return_1d', 'return_1d_open',
+        'exit_price_5d', 'return_5d', 'return_5d_open',
+        'exit_price_28d', 'return_28d', 'return_28d_open',
+        'exit_28d_close',
+        'calc_ret5d', 'return_5d_from_open', 'return_28d_from_open',
+        'entry_vs_close',
+        'return_1d_open_old', 'actual_return',
+        't1_intraday_return', 'target_crash_bin', 'target_up_bin',
+        'index_ma20_bias',
+        # Targets & helper variables
+        'close_T5', 'close_T10', 'close_T20',
+        'ret_5d', 'ret_10d', 'ret_20d',
+        'mkt_excess_ret_5d', 'mkt_excess_ret_10d', 'mkt_excess_ret_20d',
+        'ind_excess_ret_5d', 'ind_excess_ret_10d', 'ind_excess_ret_20d'
+    }
+    return [c for c in df.columns
+            if c not in exclude_cols
+            and not c.startswith('hist_')
+            and df[c].dtype in ('float64', 'float32', 'int64', 'int32')]
+
+def train_and_predict():
+    t0 = time.time()
+    print("Loading features_longterm.parquet...", flush=True)
+    df = pd.read_parquet(FEATURES_FILE)
+    df['ds'] = df['trade_date'].astype(str)
+    
+    feature_cols = get_feature_cols(df)
+    print(f"Total rows: {len(df)}")
+    print(f"Number of feature columns: {len(feature_cols)}", flush=True)
+    
+    # 划分预测月度
+    months = sorted(df['ds'].str[:6].unique())
+    pred_months = [m for m in months if m >= '202201']
+    print(f"Prediction period: {pred_months[0]} to {pred_months[-1]} ({len(pred_months)} months)", flush=True)
+    
+    # 获取所有的交易日期（用于Purging定位）
+    trade_dates = sorted(df['trade_date'].unique())
+    date_to_idx = {d: i for i, d in enumerate(trade_dates)}
+    
+    all_preds = []
+    
+    for month in pred_months:
+        mt0 = time.time()
+        
+        # 1. 确定训练结束的月份
+        train_end_month = str(int(month) - 1)
+        if train_end_month.endswith('00'):
+            train_end_month = f"{int(train_end_month[:4])-1}12"
+            
+        # 2. 12个月滚动窗口的训练起始月份
+        year = int(train_end_month[:4])
+        month_val = int(train_end_month[4:6])
+        start_year = year - 1
+        start_month = month_val + 1
+        if start_month > 12:
+            start_month -= 12
+            start_year += 1
+        rolling_start_month = f"{start_year}{start_month:02d}"
+        
+        # 3. 筛选训练集日期 (在 Purging 之前)
+        train_dates_raw = [d for d in trade_dates if d[:6] >= rolling_start_month and d[:6] <= train_end_month]
+        if len(train_dates_raw) < 20:
+            print(f"⚠️ Month {month}: Insufficient training dates, skipping.", flush=True)
+            continue
+            
+        # 4. 执行 Purging：从训练集末尾扣除 HOLDING_DAYS 天，以防止重叠持有期的信息泄露
+        # 训练集的最后可使用日期是：训练集最后一个日期的 index - HOLDING_DAYS
+        last_train_dt_raw = train_dates_raw[-1]
+        last_idx_raw = date_to_idx[last_train_dt_raw]
+        purged_last_idx = last_idx_raw - HOLDING_DAYS
+        
+        if purged_last_idx < date_to_idx[train_dates_raw[0]]:
+            print(f"⚠️ Month {month}: Purging left no training dates, skipping.", flush=True)
+            continue
+            
+        purged_last_dt = trade_dates[purged_last_idx]
+        train_dates_purged = [d for d in train_dates_raw if d <= purged_last_dt]
+        
+        # 5. 确定测试集日期
+        test_dates = [d for d in trade_dates if d[:6] == month]
+        
+        # 6. 提取训练集与测试集数据
+        train_mask = df['trade_date'].isin(train_dates_purged) & df[TARGET_COL].notna()
+        test_mask = df['trade_date'].isin(test_dates)
+        
+        train_df = df.loc[train_mask, feature_cols + [TARGET_COL]].copy()
+        test_df = df.loc[test_mask, feature_cols + ['trade_date', 'ts_code', 'next_open', 'close', 'pct_chg', 'industry', 'ret_10d', 'mkt_excess_ret_10d']].copy()
+        
+        if len(train_df) < 5000 or len(test_df) == 0:
+            print(f"⚠️ Month {month}: Skipping due to small size. Train rows: {len(train_df)}, Test rows: {len(test_df)}", flush=True)
+            continue
+            
+        # 7. 特征与目标提取
+        X_train = train_df[feature_cols].fillna(0)
+        y_train = train_df[TARGET_COL]
+        X_test = test_df[feature_cols].fillna(0)
+        
+        # 8. 训练模型与预测
+        if MODEL_TYPE == 'linear':
+            # 标准化特征 (Ridge 必须)
+            scaler = StandardScaler()
+            X_train_scaled = scaler.fit_transform(X_train)
+            X_test_scaled = scaler.transform(X_test)
+            
+            model = Ridge(alpha=RIDGE_ALPHA)
+            model.fit(X_train_scaled, y_train)
+            pred_scores = model.predict(X_test_scaled)
+        elif MODEL_TYPE == 'xgb':
+            # 浅层 XGBRegressor 避免过拟合
+            model = XGBRegressor(
+                n_estimators=100,
+                max_depth=3,
+                learning_rate=0.05,
+                subsample=0.8,
+                colsample_bytree=0.8,
+                random_state=42,
+                n_jobs=-1
+            )
+            model.fit(X_train, y_train)
+            pred_scores = model.predict(X_test)
+        else:
+            raise ValueError(f"Unknown model type: {MODEL_TYPE}")
+            
+        test_df['pred_score'] = pred_scores
+        
+        # 计算该月的样本外 Rank IC
+        valid_test = test_df[test_df[TARGET_COL].notna()]
+        if len(valid_test) > 0:
+            month_ic = valid_test['pred_score'].corr(valid_test[TARGET_COL], method='spearman')
+        else:
+            month_ic = np.nan
+            
+        print(f"Month {month} | Train rows: {len(train_df)} | Test rows: {len(test_df)} | Out-of-Sample Rank IC: {month_ic:+.4f} | Time: {time.time()-mt0:.1f}s", flush=True)
+        
+        all_preds.append(test_df[['trade_date', 'ts_code', 'next_open', 'close', 'pct_chg', 'industry', 'ret_10d', 'mkt_excess_ret_10d', 'pred_score']])
+        
+        # 内存回收
+        del train_df, test_df, X_train, y_train, X_test
+        gc.collect()
+        
+    print("Concatenating all walk-forward predictions...")
+    pred_df = pd.concat(all_preds, ignore_index=True)
+    
+    # 整体评估
+    overall_ic = pred_df.groupby('trade_date').apply(
+        lambda x: x['pred_score'].corr(x['mkt_excess_ret_10d'], method='spearman')
+    ).mean()
+    print(f"\nOverall Out-of-Sample Daily Rank IC: {overall_ic:.4f}")
+    
+    print(f"Saving predictions to {OUTPUT_FILE}...")
+    pred_df.to_parquet(OUTPUT_FILE, index=False)
+    print(f"Model training and prediction complete! Total elapsed time: {time.time()-t0:.1f}s")
+
+if __name__ == '__main__':
+    train_and_predict()
