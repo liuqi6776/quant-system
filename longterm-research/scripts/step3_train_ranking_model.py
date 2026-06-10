@@ -28,8 +28,8 @@ FEATURES_FILE = os.path.join(DATA_DIR, 'features_longterm.parquet')
 OUTPUT_FILE = os.path.join(PRED_DIR, 'predictions_longterm.parquet')
 
 # 配置参数
-TARGET_COL = 'mkt_excess_ret_10d'  # 10日市场超额收益为目标
-HOLDING_DAYS = 10                  # 持有期为10天，清除训练期最后10天数据
+TARGET_COL = 'mkt_excess_ret_20d'  # 20日市场超额收益为目标
+HOLDING_DAYS = 20                  # 持有期为20天，清除训练期最后20天数据
 MODEL_TYPE = 'linear'              # 'linear' (Ridge) 或 'xgb'
 RIDGE_ALPHA = 100.0                # 线性模型正则化强度
 
@@ -64,6 +64,10 @@ def train_and_predict():
     print("Loading features_longterm.parquet...", flush=True)
     df = pd.read_parquet(FEATURES_FILE)
     df['ds'] = df['trade_date'].astype(str)
+    
+    if 'ths_hot_rank' in df.columns:
+        print("Filling ths_hot_rank missing values with 9999.0...")
+        df['ths_hot_rank'] = df['ths_hot_rank'].fillna(9999.0)
     
     feature_cols = get_feature_cols(df)
     print(f"Total rows: {len(df)}")
@@ -125,16 +129,16 @@ def train_and_predict():
         test_mask = df['trade_date'].isin(test_dates)
         
         train_df = df.loc[train_mask, feature_cols + [TARGET_COL]].copy()
-        test_df = df.loc[test_mask, feature_cols + ['trade_date', 'ts_code', 'next_open', 'close', 'pct_chg', 'industry', 'ret_10d', 'mkt_excess_ret_10d']].copy()
+        test_df = df.loc[test_mask, feature_cols + ['trade_date', 'ts_code', 'next_open', 'close', 'pct_chg', 'industry', 'ret_20d', 'mkt_excess_ret_20d']].copy()
         
         if len(train_df) < 5000 or len(test_df) == 0:
             print(f"⚠️ Month {month}: Skipping due to small size. Train rows: {len(train_df)}, Test rows: {len(test_df)}", flush=True)
             continue
             
         # 7. 特征与目标提取
-        X_train = train_df[feature_cols].fillna(0)
+        X_train = train_df[feature_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
         y_train = train_df[TARGET_COL]
-        X_test = test_df[feature_cols].fillna(0)
+        X_test = test_df[feature_cols].replace([np.inf, -np.inf], np.nan).fillna(0)
         
         # 8. 训练模型与预测
         if MODEL_TYPE == 'linear':
@@ -173,7 +177,7 @@ def train_and_predict():
             
         print(f"Month {month} | Train rows: {len(train_df)} | Test rows: {len(test_df)} | Out-of-Sample Rank IC: {month_ic:+.4f} | Time: {time.time()-mt0:.1f}s", flush=True)
         
-        all_preds.append(test_df[['trade_date', 'ts_code', 'next_open', 'close', 'pct_chg', 'industry', 'ret_10d', 'mkt_excess_ret_10d', 'pred_score']])
+        all_preds.append(test_df[['trade_date', 'ts_code', 'next_open', 'close', 'pct_chg', 'industry', 'ret_20d', 'mkt_excess_ret_20d', 'pred_score']])
         
         # 内存回收
         del train_df, test_df, X_train, y_train, X_test
@@ -184,7 +188,7 @@ def train_and_predict():
     
     # 整体评估
     overall_ic = pred_df.groupby('trade_date').apply(
-        lambda x: x['pred_score'].corr(x['mkt_excess_ret_10d'], method='spearman')
+        lambda x: x['pred_score'].corr(x['mkt_excess_ret_20d'], method='spearman')
     ).mean()
     print(f"\nOverall Out-of-Sample Daily Rank IC: {overall_ic:.4f}")
     

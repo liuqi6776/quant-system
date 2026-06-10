@@ -48,7 +48,8 @@ def calculate_alpha101_factors(df: pd.DataFrame, group_col: str = 'ts_code') -> 
         delta_close = group['close'].diff(1)
         cond1 = delta_close.rolling(5).min() > 0
         cond2 = delta_close.rolling(5).max() < 0
-        return np.where(cond1, delta_close, np.where(cond2, delta_close, -1 * delta_close))
+        res = np.where(cond1, delta_close, np.where(cond2, delta_close, -1 * delta_close))
+        return pd.Series(res, index=group.index)
     
     df['alpha_009'] = df.groupby(group_col).apply(calc_alpha_009).reset_index(level=0, drop=True)
     
@@ -61,7 +62,8 @@ def calculate_alpha101_factors(df: pd.DataFrame, group_col: str = 'ts_code') -> 
     # Alpha 23: ((sum(high, 20) / 20) < high) ? (-1 * delta(high, 2)) : 0
     def calc_alpha_023(group):
         mean_high = group['high'].rolling(20).mean()
-        return np.where(mean_high < group['high'], -1 * group['high'].diff(2), 0)
+        res = np.where(mean_high < group['high'], -1 * group['high'].diff(2), 0)
+        return pd.Series(res, index=group.index)
     
     df['alpha_023'] = df.groupby(group_col).apply(calc_alpha_023).reset_index(level=0, drop=True)
     
