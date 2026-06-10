@@ -51,7 +51,7 @@ def run():
     df['ds'] = df['trade_date'].astype(str)
     
     # 构造 label_up
-    df['label_up'] = (df['return_1d_open'] > 0.01).astype(np.int8)
+    df['label_up'] = df['target_up_bin'].fillna(0).astype(np.int8)
     
     # 如果 target_crash_bin 有 NaN，处理一下
     df['label_crash'] = df['target_crash_bin'].fillna(0).astype(np.int8)

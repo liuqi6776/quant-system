@@ -46,23 +46,26 @@ def build_features():
     df['next_close'] = df.groupby('ts_code')['close'].shift(-1)
     df['d2_close'] = df.groupby('ts_code')['close'].shift(-2)
     
-    # 目标 1: target_up (T+2收盘 - T+1开盘) / T+1开盘
+    df['next_high'] = df.groupby('ts_code')['high'].shift(-1)
+    df['d2_high'] = df.groupby('ts_code')['high'].shift(-2)
+    df['next_low'] = df.groupby('ts_code')['low'].shift(-1)
+    df['d2_low'] = df.groupby('ts_code')['low'].shift(-2)
+    
+    # 目标 1: return_1d_open (T+2收盘 - T+1开盘) / T+1开盘 (保留做回归或分析)
     df['return_1d_open'] = (df['d2_close'] - df['next_open']) / df['next_open']
     
-    # 目标 2: target_crash_raw (T+1收盘 - T+1开盘) / T+1开盘
-    df['t1_intraday_return'] = (df['next_close'] - df['next_open']) / df['next_open']
+    # 实际高低价计算
+    max_high = df[['next_high', 'd2_high']].max(axis=1)
+    min_low = df[['next_low', 'd2_low']].min(axis=1)
     
-    # 构建二分类目标
-    # 注意：这里我们定义模型目标，XGBoost 二分类预测的是 probability of class 1.
-    # 所以 target_up_bin: 是否涨幅 > 1% (用于分类) 或保留回归目标 (取决于你的模型)
-    # 我们这里保留 return_1d_open 作为目标1的连续值 (因为原来可能用了回归)
-    # 目标2是分类：是否出现单日暴跌 (小于 -3%)
-    df['target_crash_bin'] = (df['t1_intraday_return'] < -0.03).astype(int)
+    # 构建物理止盈/止损二分类目标 (T+1开盘买入，T+2收盘前是否触及+6%或-5%)
+    df['target_up_bin'] = ((max_high - df['next_open']) / df['next_open'] >= 0.06).astype(int)
+    df['target_crash_bin'] = ((min_low - df['next_open']) / df['next_open'] <= -0.05).astype(int)
     
-    # 对于 target_crash_bin，如果是 NaN，就用 0
-    df.loc[df['t1_intraday_return'].isna(), 'target_crash_bin'] = np.nan
+    # 处理边界 NaNs
+    df.loc[df['return_1d_open'].isna(), ['target_up_bin', 'target_crash_bin']] = np.nan
     
-    df = df.drop(columns=['next_close', 'd2_close'])
+    df = df.drop(columns=['next_close', 'd2_close', 'next_high', 'd2_high', 'next_low', 'd2_low'])
     
     print("Saving to", OUT_FEAT)
     df.to_parquet(OUT_FEAT)

@@ -346,7 +346,7 @@ def execute_morning_buy(context, data):
         
         # 再次确认开盘价状态（一字涨停避险）
         open_price = data[ptrade_code].open
-        pre_close = data[ptrade_code].close # 昨收
+        pre_close = data[ptrade_code].pre_close # 昨收
         
         # 一字涨停避险判定 (Limit Up protection)
         limit_up_pct = 0.195 if ptrade_code.startswith(('300', '688')) else 0.095
@@ -525,5 +525,8 @@ def send_wechat_notification(title, content):
 def convert_code_to_ptrade(ts_code: str) -> str:
     """
     转换证券代码格式
+    将 Tushare 格式 (如 600000.SH) 转换为 PTrade 格式 (如 600000.SS)
     """
+    if ts_code.endswith('.SH'):
+        return ts_code[:-3] + '.SS'
     return ts_code
