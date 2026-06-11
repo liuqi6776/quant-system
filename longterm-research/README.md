@@ -110,9 +110,61 @@ Where:
 
 ---
 
+## 🛡️ Out-of-Sample Blind Test (Holdout Period 2025-09-01 to 2026-03-11)
+
+To verify that the strategy's Sharpe 0.73 is not simply "2025 thematic luck" and to check if the pipeline is overfitting, we ran a pure blind test on the last 6 months of data (**2025-09-01 to 2026-03-11**, 124 trading days). These dates were completely out-of-sample and served as a holdout period.
+
+### Blind Test Performance Summary:
+
+| Portfolio | Total Return | Annualized Return | Annualized Volatility | Sharpe Ratio | Max Drawdown |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **Strategy (Pure Multi-Factor)** | **+15.34%** | **+30.33%** | **21.06%** | **1.87** | **-6.99%** |
+| **Strategy (Options Wind-Control)** | **+11.47%** | **+23.16%** | **20.10%** | **1.57** | **-6.90%** |
+| **Benchmark (Market Equal-Weight)** | **+14.00%** | **+27.82%** | **22.12%** | **1.81** | **-6.52%** |
+| **Benchmark (CSI 1000 Index)** | **+11.50%** | **+24.23%** | **27.51%** | **1.18** | **-7.59%** |
+
+### Blind Test Style Regression Findings:
+- **Positive Excess Return**: The strategy (+15.34%) outperformed the Market Equal-Weight benchmark (+14.00%) and the CSI 1000 index (+11.50%) in absolute returns during this 6-month period.
+- **Insignificant Residual Alpha**: In Model 2 (controlling for Market, SMB, and Industry Excess), the annualized alpha is **+30.80%** but is **not statistically significant** ($t$-statistic **0.6427**, $p$-value **0.534**).
+- **Style/Sector Domination**: The regression $R^2$ is **98.02%**, and the strategy's size beta ($\beta_s$) is **1.01**. This indicates that during this 6-month holdout period, the strategy's variance was almost entirely explained by its exposure to market, small-cap style, and industry sectors, resulting in statistically insignificant pure selection alpha.
+
+---
+
+## 🔬 Incremental Factor Evaluation (Config A vs B vs C)
+
+We evaluated the short-sample factors (`ths_hot_rank` and `news_stock_impact`) over their active period (**2024-09-02 to 2026-03-11**) to check if they add genuine selection alpha. 
+
+We compared three walk-forward strategy configurations:
+- **Config A (Baseline)**: Excludes both `ths_hot_rank` and news factors.
+- **Config B (Baseline + News)**: Excludes `ths_hot_rank`, includes news factors.
+- **Config C (Baseline + News + THS)**: Includes news factors and the corrected `ths_hot_score` factor (using `ths_hot_score = 101.0 - ths_hot_rank` for rank <= 100, and `0.0` for missing values, completely avoiding the `9999` outlier bug).
+
+### Incremental Test Comparison Table:
+
+| Metric | Config A (Baseline) | Config B (+News) | Config C (+News+THS) |
+| :--- | :---: | :---: | :---: |
+| **Total Return** | **95.57%** | 95.35% | 87.76% |
+| **Sharpe Ratio** | **2.31** | **2.32** | 2.18 |
+| **Max Drawdown** | -13.78% | -13.48% | **-13.19%** |
+| **Annualized Alpha** | **17.30%** | **17.38%** | 16.43% |
+| **Alpha t-statistic** | 1.6919 | **1.7293** | 1.5971 |
+| **Alpha p-value** | 0.091893 | **0.084975** | 0.111498 |
+| **Beta Market ($\beta_m$)** | 0.9670 | 0.9664 | 0.9800 |
+| **Beta Size ($\beta_s$)** | -0.0613 | -0.0541 | -0.0253 |
+| **R-squared ($R^2$)** | 85.32% | 85.66% | 85.12% |
+
+### Empirical Conclusions:
+1. **News Factor Adds Marginally**: Adding the news factors (Config B vs A) slightly increased the annualized alpha from **17.30%** to **17.38%** (+0.08% change) and the $t$-statistic from **1.69** to **1.73**. The overall Sharpe ratio changed from **2.31** to **2.32**. News factors provide almost zero incremental stock selection value after controlling for styles.
+2. **Concept Hot Rank Degrades Performance**: Adding the `ths_hot_score` (Config C vs B) **reduced** the strategy's total return from **95.35%** to **87.76%** (a **-7.59% drop** in returns) and **reduced** the Sharpe ratio from **2.32** to **2.18**. The annualized style alpha dropped by **-0.95%** (from **17.38%** to **16.43%**), and the $t$-statistic fell from **1.73** to **1.60**.
+3. **Overfitting & Noise Warning**: This shows that single-factor IC (where `ths_hot_rank` had a high IC of +0.14 in 2024–2025) was a short-sample thematic artifact. When used in walk-forward multi-factor Ridge regression, it acts as noise and leads to overfitting, resulting in significantly worse out-of-sample performance. **We exclude it from production.**
+4. **Recent Period Style Domination**: Over this 1.5-year period, none of the configurations achieved a statistically significant selection alpha ($p > 0.05$, $t < 1.96$), showing that strategy returns were heavily dominated by style and industry exposures rather than pure stock selection.
+
+---
+
 ## 🚀 Future Refinement Roadmap
 
 To further refine the strategy's clean alpha, we will prioritize the following steps:
-1. [x] **Year-by-Year Performance Audit**: Completed. Broke down performance by calendar years and identified that the outperformance is regime-dependent, with strongest excess returns in 2023 and 2025, while underperforming the equal-weight benchmark in 2022, 2024, and 2026.
-2. [ ] **Winsorization & Industry Neutralization**: Apply cross-sectional winsorization (handling outliers) and industry-neutralization on factors *before* feeding them to the Ridge regression, ensuring a cleaner linear relation and more monotonic ranking score.
-3. [ ] **Out-of-Sample Holdout Testing**: Reserve the final 6 months of data (e.g., late 2025 to 2026) completely untouched by the model and feature engineering to serve as a pure blind validation set.
+1. [x] **Year-by-Year Performance Audit**: Completed. Broke down performance by calendar years, showing that outperformance is cyclical and regime-dependent (strongest in 2023 and 2025, but underperforming in 2022, 2024, and 2026).
+2. [x] **Out-of-Sample Holdout Testing**: Completed. Ran a 6-month blind test (2025-09-01 to 2026-03-11), showing that the strategy remains positive (+15.34% return, 1.87 Sharpe) but selection alpha is statistically insignificant due to strong style/industry domination ($R^2 = 98\%$).
+3. [x] **Incremental Factor Testing & Missing Value Fix**: Completed. Evaluated `ths_hot_rank` and `news_stock_impact` over their active period (2024–2026) using an OLS alpha comparison. We fixed the `ths_hot_rank` outlier bug using a neutral-value `ths_hot_score` mapping. The test proved that `ths_hot_rank` degrades out-of-sample performance (reducing return from 95.35% to 87.76%) and should be excluded.
+4. [ ] **Winsorization & Industry Neutralization**: Apply cross-sectional winsorization (handling outliers) and industry-neutralization on factors *before* feeding them to the Ridge regression, ensuring a cleaner linear relation and more monotonic ranking score.

@@ -252,9 +252,9 @@ def compute_metrics(nav_series, name):
         'max_dd_raw': max_dd
     }
 
-def run_backtest():
-    print("Loading predictions...", flush=True)
-    pred_df = pd.read_parquet(PRED_FILE)
+def run_backtest(pred_file=PRED_FILE, results_dir=RESULTS_DIR, save_plot=True):
+    print(f"Loading predictions from {pred_file}...", flush=True)
+    pred_df = pd.read_parquet(pred_file)
     pred_df = pred_df.drop_duplicates(subset=['trade_date', 'ts_code'])
     
     print("Loading volume and option columns from features...", flush=True)
@@ -319,38 +319,40 @@ def run_backtest():
     print("==========================================================================")
     
     # 保存数据结果
+    os.makedirs(results_dir, exist_ok=True)
     results_nav = pd.DataFrame({
         'Strategy_Pure': nav_pure['nav'],
         'Strategy_Hedged': nav_hedged['nav'],
         'Benchmark_EqualWeight': nav_pure['benchmark'],
         'Benchmark_CSI1000': nav_pure['csi1000']
     })
-    results_nav.to_csv(os.path.join(RESULTS_DIR, 'portfolio_comparison_nav.csv'))
-    summary_df.to_csv(os.path.join(RESULTS_DIR, 'portfolio_comparison_metrics.csv'), index=False)
+    results_nav.to_csv(os.path.join(results_dir, 'portfolio_comparison_nav.csv'))
+    summary_df.to_csv(os.path.join(results_dir, 'portfolio_comparison_metrics.csv'), index=False)
     
-    # 5. 绘制多曲线对比图
-    plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
-    fig, ax = plt.subplots(figsize=(12, 7))
-    
-    ax.plot(results_nav.index, results_nav['Strategy_Pure'] / INITIAL_CAPITAL, 
-            label='Strategy (Pure Multi-Factor - 54 alphas)', color='#1565c0', linewidth=2.0)
-    ax.plot(results_nav.index, results_nav['Strategy_Hedged'] / INITIAL_CAPITAL, 
-            label='Strategy (Options Wind-Controlled - Risk Off)', color='#2e7d32', linewidth=2.5)
-    ax.plot(results_nav.index, results_nav['Benchmark_EqualWeight'] / INITIAL_CAPITAL, 
-            label='Benchmark (Market Equal-Weight)', color='#78909c', linewidth=1.5, linestyle='--')
-    ax.plot(results_nav.index, results_nav['Benchmark_CSI1000'] / INITIAL_CAPITAL, 
-            label='Benchmark (CSI 1000 Index)', color='#e65100', linewidth=1.8, linestyle='-.')
-    
-    ax.set_title('A-Share Multi-Factor Portfolio Backtest (2022-2026 Out-of-Sample)', fontsize=14, fontweight='bold', pad=15)
-    ax.set_xlabel('Date', fontsize=12)
-    ax.set_ylabel('Normalized Net Asset Value (NAV)', fontsize=12)
-    ax.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.9, edgecolor='lightgray')
-    
-    plt.tight_layout()
-    out_png = os.path.join(RESULTS_DIR, 'portfolio_backtest_nav.png')
-    plt.savefig(out_png, dpi=300)
-    print(f"Saved comparison plot to {out_png}")
-    plt.close()
+    if save_plot:
+        # 5. 绘制多曲线对比图
+        plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
+        fig, ax = plt.subplots(figsize=(12, 7))
+        
+        ax.plot(results_nav.index, results_nav['Strategy_Pure'] / INITIAL_CAPITAL, 
+                label='Strategy (Pure Multi-Factor)', color='#1565c0', linewidth=2.0)
+        ax.plot(results_nav.index, results_nav['Strategy_Hedged'] / INITIAL_CAPITAL, 
+                label='Strategy (Options Wind-Controlled)', color='#2e7d32', linewidth=2.5)
+        ax.plot(results_nav.index, results_nav['Benchmark_EqualWeight'] / INITIAL_CAPITAL, 
+                label='Benchmark (Market Equal-Weight)', color='#78909c', linewidth=1.5, linestyle='--')
+        ax.plot(results_nav.index, results_nav['Benchmark_CSI1000'] / INITIAL_CAPITAL, 
+                label='Benchmark (CSI 1000 Index)', color='#e65100', linewidth=1.8, linestyle='-.')
+        
+        ax.set_title('A-Share Multi-Factor Portfolio Backtest (Out-of-Sample)', fontsize=14, fontweight='bold', pad=15)
+        ax.set_xlabel('Date', fontsize=12)
+        ax.set_ylabel('Normalized Net Asset Value (NAV)', fontsize=12)
+        ax.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.9, edgecolor='lightgray')
+        
+        plt.tight_layout()
+        out_png = os.path.join(results_dir, 'portfolio_backtest_nav.png')
+        plt.savefig(out_png, dpi=300)
+        print(f"Saved comparison plot to {out_png}")
+        plt.close()
 
 if __name__ == '__main__':
     run_backtest()

@@ -33,7 +33,7 @@ HOLDING_DAYS = 20                  # 持有期为20天，清除训练期最后20
 MODEL_TYPE = 'linear'              # 'linear' (Ridge) 或 'xgb'
 RIDGE_ALPHA = 100.0                # 线性模型正则化强度
 
-def get_feature_cols(df):
+def get_feature_cols(df, exclude_config=None):
     exclude_cols = {
         'ts_code', 'trade_date', 'ds', 'industry',
         'open', 'high', 'low', 'close', 'pre_close',
@@ -55,28 +55,50 @@ def get_feature_cols(df):
         'mkt_excess_ret_5d', 'mkt_excess_ret_10d', 'mkt_excess_ret_20d',
         'ind_excess_ret_5d', 'ind_excess_ret_10d', 'ind_excess_ret_20d'
     }
+    if exclude_config is not None:
+        exclude_cols.update(exclude_config)
     return [c for c in df.columns
             if c not in exclude_cols
             and not c.startswith('hist_')
             and df[c].dtype in ('float64', 'float32', 'int64', 'int32')]
 
-def train_and_predict():
+def train_and_predict(feature_config='B', output_file=OUTPUT_FILE, start_month='202201'):
     t0 = time.time()
-    print("Loading features_longterm.parquet...", flush=True)
+    print(f"Starting train_and_predict with Config: {feature_config}...", flush=True)
     df = pd.read_parquet(FEATURES_FILE)
     df['ds'] = df['trade_date'].astype(str)
     
+    # 转换 ths_hot_rank 为 ths_hot_score (101 - rank，缺失值为0)
+    # 彻底废除 9999 的极端值填充，采用 0.0 作为中性/无热度表达
     if 'ths_hot_rank' in df.columns:
-        print("Filling ths_hot_rank missing values with 9999.0...")
-        df['ths_hot_rank'] = df['ths_hot_rank'].fillna(9999.0)
+        print("Converting ths_hot_rank to ths_hot_score (range 1-100 mapped to 100-1, NaNs/others mapped to 0.0)...", flush=True)
+        df['ths_hot_score'] = np.where(
+            (df['ths_hot_rank'].notna()) & (df['ths_hot_rank'] <= 100.0),
+            101.0 - df['ths_hot_rank'],
+            0.0
+        )
     
-    feature_cols = get_feature_cols(df)
+    # 根据配置过滤特征列
+    extra_excludes = set()
+    if feature_config == 'A':
+        # Baseline: 排除 THS 评分 和 所有新闻相关特征
+        extra_excludes.update(['ths_hot_score', 'news_stock_impact', 'news_market_impact', 'news_has_mention', 'new_gs', 'new_bs', 'new_gi'])
+    elif feature_config == 'B':
+        # Baseline + News (当前默认策略): 排除 THS 评分
+        extra_excludes.add('ths_hot_score')
+    elif feature_config == 'C':
+        # Baseline + News + THS: 包含所有
+        pass
+    else:
+        raise ValueError(f"Unknown feature_config: {feature_config}")
+        
+    feature_cols = get_feature_cols(df, exclude_config=extra_excludes)
     print(f"Total rows: {len(df)}")
     print(f"Number of feature columns: {len(feature_cols)}", flush=True)
     
     # 划分预测月度
     months = sorted(df['ds'].str[:6].unique())
-    pred_months = [m for m in months if m >= '202201']
+    pred_months = [m for m in months if m >= start_month]
     print(f"Prediction period: {pred_months[0]} to {pred_months[-1]} ({len(pred_months)} months)", flush=True)
     
     # 获取所有的交易日期（用于Purging定位）
@@ -110,7 +132,6 @@ def train_and_predict():
             continue
             
         # 4. 执行 Purging：从训练集末尾扣除 HOLDING_DAYS 天，以防止重叠持有期的信息泄露
-        # 训练集的最后可使用日期是：训练集最后一个日期的 index - HOLDING_DAYS
         last_train_dt_raw = train_dates_raw[-1]
         last_idx_raw = date_to_idx[last_train_dt_raw]
         purged_last_idx = last_idx_raw - HOLDING_DAYS
@@ -143,7 +164,6 @@ def train_and_predict():
         
         # 8. 训练模型与预测
         if MODEL_TYPE == 'linear':
-            # 标准化特征 (Ridge 必须)
             scaler = StandardScaler()
             X_train_scaled = scaler.fit_transform(X_train)
             X_test_scaled = scaler.transform(X_test)
@@ -152,7 +172,6 @@ def train_and_predict():
             model.fit(X_train_scaled, y_train)
             pred_scores = model.predict(X_test_scaled)
         elif MODEL_TYPE == 'xgb':
-            # 浅层 XGBRegressor 避免过拟合
             model = XGBRegressor(
                 n_estimators=100,
                 max_depth=3,
@@ -169,7 +188,6 @@ def train_and_predict():
             
         test_df['pred_score'] = pred_scores
         
-        # 计算该月的样本外 Rank IC
         valid_test = test_df[test_df[TARGET_COL].notna()]
         if len(valid_test) > 0:
             month_ic = valid_test['pred_score'].corr(valid_test[TARGET_COL], method='spearman')
@@ -180,21 +198,19 @@ def train_and_predict():
         
         all_preds.append(test_df[['trade_date', 'ts_code', 'next_open', 'close', 'pct_chg', 'industry', 'ret_20d', 'mkt_excess_ret_20d', 'pred_score']])
         
-        # 内存回收
         del train_df, test_df, X_train, y_train, X_test
         gc.collect()
         
     print("Concatenating all walk-forward predictions...")
     pred_df = pd.concat(all_preds, ignore_index=True)
     
-    # 整体评估
     overall_ic = pred_df.groupby('trade_date').apply(
         lambda x: x['pred_score'].corr(x['mkt_excess_ret_20d'], method='spearman')
     ).mean()
     print(f"\nOverall Out-of-Sample Daily Rank IC: {overall_ic:.4f}")
     
-    print(f"Saving predictions to {OUTPUT_FILE}...")
-    pred_df.to_parquet(OUTPUT_FILE, index=False)
+    print(f"Saving predictions to {output_file}...")
+    pred_df.to_parquet(output_file, index=False)
     print(f"Model training and prediction complete! Total elapsed time: {time.time()-t0:.1f}s")
 
 if __name__ == '__main__':

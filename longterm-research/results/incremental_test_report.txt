@@ -1,0 +1,30 @@
+==========================================================================
+                 Incremental Factor Regression Report                    
+==========================================================================
+Comparison Period: 2024-09-02 to 2026-03-11 (Features Active)
+Regresion Model: Model 2 (Market + SMB + Orthogonalized Industry Excess)
+==========================================================================
+Metric                    | Config A (Baseline)  | Config B (+News)     | Config C (+News+THS)
+--------------------------------------------------------------------------
+Total Return              | 95.57%               | 95.35%               | 87.76%              
+Sharpe Ratio              | 2.31                 | 2.32                 | 2.18                
+Max Drawdown              | -13.78%              | -13.48%              | -13.19%             
+--------------------------------------------------------------------------
+Annualized Alpha          | 17.30%               | 17.38%               | 16.43%              
+Alpha t-statistic         | 1.6919               | 1.7293               | 1.5971              
+Alpha p-value             | 0.091893             | 0.084975             | 0.111498            
+Beta Market (beta_m)      | 0.9670               | 0.9664               | 0.9800              
+Beta Size (beta_s)        | -0.0613              | -0.0541              | -0.0253             
+R-squared                 | 85.32%               | 85.66%               | 85.12%              
+==========================================================================
+
+Empirical Conclusions:
+1. News Factor Incremental Value (Config B vs A):
+   - Annualized Alpha change: +0.08%
+   - Alpha t-stat: A = 1.69 (not sig) | B = 1.73 (not sig)
+2. THS Rank Factor Incremental Value (Config C vs B):
+   - Annualized Alpha change: -0.96%
+   - Alpha t-stat: B = 1.73 (not sig) | C = 1.60 (not sig)
+3. Style Explanation:
+   - Config C's style/industry R2 is 85.12%, meaning style exposures explain the vast majority of daily return fluctuations.
+==========================================================================
