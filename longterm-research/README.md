@@ -91,6 +91,20 @@ Where:
 - **Genuine Residual Alpha Proven**: After completely controlling for both the daily market index return, the small-cap factor (SMB), and all industry returns, the strategy generates a **statistically significant, positive selection alpha of +11.90% annualized (t-statistic 2.36, p-value 0.018)**. 
 - **Proven Alpha Wording Verified**: Since the alpha intercept is statistically significant ($p < 0.05$, $t > 1.96$), we can confidently conclude that the strategy contains **genuine stock selection alpha** and is not simply a small-cap beta wrapper.
 
+### Year-by-Year Performance Breakdown:
+
+| Year | Strategy | CSI 1000 | Market Equal-Weight | Excess vs CSI 1000 | Excess vs Equal-Weight |
+| :--- | :---: | :---: | :---: | :---: | :---: |
+| **2022** | -6.92% | -21.31% | -5.30% | +14.39% | -1.62% |
+| **2023** | +11.06% | -6.28% | +3.87% | +17.34% | +7.19% |
+| **2024** | -0.33% | +1.20% | +3.34% | -1.53% | -3.67% |
+| **2025** | +48.48% | +27.49% | +32.48% | +20.99% | +15.99% |
+| **2026** | +4.56% | +10.11% | +9.14% | -5.56% | -4.59% |
+
+### Year-by-Year Analysis:
+- **Cyclical Performance**: The year-by-year audit shows that while the strategy outperforms the large-cap CSI 1000 index over the full sample, it is not uniformly superior across all years. It outperformed CSI 1000 in 2022 (+14.39%), 2023 (+17.34%), and 2025 (+20.99%), but underperformed in 2024 (-1.53%) and 2026 (-5.56%).
+- **Relative to Equal-Weight Benchmark**: The strategy outperformed the Equal-Weight Benchmark in 2023 (+7.19%) and 2025 (+15.99%), but underperformed in 2022 (-1.62%), 2024 (-3.67%), and 2026 (-4.59%). This indicates that the selection alpha is highly regime-dependent, performing exceptionally well in broad rally years like 2025 and 2023, but struggling to beat simple equal-weighting in flat or transition years like 2024 and 2026.
+
 ### Cumulative Residual Return (Clean Alpha)
 ![Cumulative Residual Return](results/style_attribution_residual.png)
 
@@ -99,6 +113,6 @@ Where:
 ## 🚀 Future Refinement Roadmap
 
 To further refine the strategy's clean alpha, we will prioritize the following steps:
-1. **Year-by-Year Performance Audit**: Break down the backtest by calendar years (2022, 2023, 2024, 2025, 2026) to verify if the return is stable or if it was heavily carried by a single anomalous small-cap year (e.g., 2024).
-2. **Winsorization & Industry Neutralization**: Apply cross-sectional winsorization (handling outliers) and industry-neutralization on factors *before* feeding them to the Ridge regression, ensuring a cleaner linear relation and more monotonic ranking score.
-3. **Out-of-Sample Holdout Testing**: Reserve the final 6 months of data (e.g., late 2025 to 2026) completely untouched by the model and feature engineering to serve as a pure blind validation set.
+1. [x] **Year-by-Year Performance Audit**: Completed. Broke down performance by calendar years and identified that the outperformance is regime-dependent, with strongest excess returns in 2023 and 2025, while underperforming the equal-weight benchmark in 2022, 2024, and 2026.
+2. [ ] **Winsorization & Industry Neutralization**: Apply cross-sectional winsorization (handling outliers) and industry-neutralization on factors *before* feeding them to the Ridge regression, ensuring a cleaner linear relation and more monotonic ranking score.
+3. [ ] **Out-of-Sample Holdout Testing**: Reserve the final 6 months of data (e.g., late 2025 to 2026) completely untouched by the model and feature engineering to serve as a pure blind validation set.

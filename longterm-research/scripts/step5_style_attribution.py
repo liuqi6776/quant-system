@@ -4,13 +4,14 @@ step5_style_attribution.py
 1. 自建日度风格因子：
    - 市场因子 (R_m)：全市场个股日度等权平均收益率。
    - 市值因子 (SMB)：每日按流通市值 (circ_mv) 排序，做多最小 30% 股票平均收益，做空最大 30% 股票平均收益。
-   - 行业因子 (Industry)：各行业每日个股等权平均收益率。
+   - 行业超额因子 (R_ind - R_m)：各行业每日个股等权平均收益率减去全市场等权平均收益，消除行业因子的共线性。
 2. 线性回归 (OLS)：
    - 仅回归 市场 + 市值： R_strategy = alpha + beta_m * R_m + beta_s * SMB + e
-   - 结合 市场 + 市值 + 行业：加入各行业收益率自变量，消除行业偏离。
+   - 结合 市场 + 市值 + 行业超额： R_strategy = alpha + beta_m * R_m + beta_s * SMB + sum(beta_i * (R_ind_i - R_m)) + e
 3. 统计检验与可视化：
    - 计算日度 Alpha、年化 Alpha 及其 t 统计量、p 值和 R-squared。
    - 绘制“纯 Alpha” (Residual Return) 累计收益率曲线。
+4. 分年度业绩拆分。
 """
 import os
 import pandas as pd
@@ -29,7 +30,7 @@ REPORT_FILE = os.path.join(RESULTS_DIR, 'style_attribution_report.txt')
 PLOT_FILE = os.path.join(RESULTS_DIR, 'style_attribution_residual.png')
 
 def run_attribution():
-    print(">>> Starting Style Attribution Analysis...", flush=True)
+    print(">>> Starting Style Attribution Analysis (Fixing Multicollinearity)...", flush=True)
     
     # 1. 加载策略每日净值
     if not os.path.exists(NAV_FILE):
@@ -76,28 +77,49 @@ def run_attribution():
 
     df_smb = df_feat.groupby('trade_date').apply(calc_smb).reset_index().rename(columns={0: 'SMB'})
     
-    # C. 行业平均因子
-    print("Calculating daily Industry factors...", flush=True)
+    # C. 行业平均因子 (原始收益)
+    print("Calculating daily Industry raw returns...", flush=True)
     df_ind = df_feat.groupby(['trade_date', 'industry'])['pct_chg'].mean().unstack(fill_value=0.0).reset_index()
     
+    # D. 加载中证1000指数日收益率作为比对基准
+    index_file = os.path.join(DATA_DIR, 'index_regime.csv')
+    if os.path.exists(index_file):
+        print("Loading CSI 1000 index returns...", flush=True)
+        idx_df = pd.read_csv(index_file)
+        idx_df['trade_date'] = idx_df['trade_date'].astype(str)
+        idx_df = idx_df[idx_df['trade_date'].isin(trade_dates)].sort_values('trade_date').reset_index(drop=True)
+        idx_df['CSI1000_Ret'] = idx_df['close'].pct_change().fillna(0.0)
+        idx_map = idx_df.set_index('trade_date')['CSI1000_Ret'].to_dict()
+    else:
+        idx_map = {}
+        
     # 3. 合并自变量与因变量
     df_reg = df_nav[['trade_date_str', 'Strategy_Ret']].merge(df_mkt, left_on='trade_date_str', right_on='trade_date', how='inner')
     df_reg = df_reg.merge(df_smb, on='trade_date', how='inner')
     df_reg = df_reg.merge(df_ind, on='trade_date', how='inner')
     
+    df_reg['CSI1000_Ret'] = df_reg['trade_date'].map(idx_map).fillna(0.0)
+    
+    # 行业列
+    ind_cols = [col for col in df_ind.columns if col not in ['trade_date', 'Unknown']]
+    
+    # 【核心修正】：将行业因子的自变量改为行业相对市场的超额收益率 (R_ind - R_m)
+    # 从而完全解决 R_m 与所有行业因子相加等于全市场组合造成的 perfect multicollinearity 问题
+    print("Converting industry raw returns to industry excess returns (R_ind - R_m) to solve multicollinearity...", flush=True)
+    for col in ind_cols:
+        df_reg[col] = df_reg[col] - df_reg['R_m']
+        
     # 4. 执行 OLS 回归
+    y = df_reg['Strategy_Ret']
+    
     # A. Model 1: 仅考虑 市场(R_m) + 市值(SMB)
     X1 = df_reg[['R_m', 'SMB']]
     X1 = sm.add_constant(X1)
-    y = df_reg['Strategy_Ret']
-    
     model1 = sm.OLS(y, X1).fit()
     
-    # B. Model 2: 考虑 市场(R_m) + 市值(SMB) + 行业因子 (为防止多重共线性，排除Unknown行业列)
-    ind_cols = [col for col in df_ind.columns if col not in ['trade_date', 'Unknown']]
+    # B. Model 2: 考虑 市场(R_m) + 市值(SMB) + 行业超额因子 (控制了多重共线性)
     X2 = df_reg[['R_m', 'SMB'] + ind_cols]
     X2 = sm.add_constant(X2)
-    
     model2 = sm.OLS(y, X2).fit()
     
     # 5. 输出报告
@@ -107,7 +129,8 @@ def run_attribution():
     report.append("==========================================================================")
     report.append(f"Backtest Period: {start_date} to {end_date} ({len(df_reg)} trading days)")
     report.append("==========================================================================")
-    report.append("\n[Model 1: Market & Size Factor Regression]")
+    
+    report.append("\n[Model 1: Market & Size Factor Regression (Standard)]")
     report.append(f"Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + e")
     report.append("--------------------------------------------------------------------------")
     
@@ -128,8 +151,8 @@ def run_attribution():
     report.append(f"R-squared:               {r2_m1:.4f} (Style explains {r2_m1:.2%} of variance)")
     
     report.append("\n==========================================================================")
-    report.append("[Model 2: Market, Size & Industry Factors Regression]")
-    report.append(f"Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + sum(beta_i * R_ind_i) + e")
+    report.append("[Model 2: Market, Size & Orthogonalized Industry Excess Regression]")
+    report.append(f"Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + sum(beta_i * (R_ind_i - R_m)) + e")
     report.append("--------------------------------------------------------------------------")
     
     alpha_m2 = model2.params['const']
@@ -148,8 +171,8 @@ def run_attribution():
     report.append(f"Beta Size (beta_s):      {beta_s_m2:.4f} (t-stat: {model2.tvalues['SMB']:.2f})")
     report.append(f"R-squared:               {r2_m2:.4f} (Style explains {r2_m2:.2%} of variance)")
     
-    # 提取显著的行业偏离
-    report.append("\nSignificant Industry Exposures (p < 0.05):")
+    # 提取显著的行业主动偏离暴露 (p < 0.05)
+    report.append("\nSignificant Active Industry Exposures (p < 0.05):")
     sig_inds = []
     for col in ind_cols:
         p_val = model2.pvalues[col]
@@ -162,6 +185,25 @@ def run_attribution():
     else:
         report.append("  None")
         
+    # 6. 分年度绩效拆分 (Year-by-Year Performance Breakdown)
+    report.append("\n==========================================================================")
+    report.append("                   Year-by-Year Strategy Performance                      ")
+    report.append("==========================================================================")
+    report.append(f"{'Year':<6} | {'Strategy':<10} | {'CSI 1000':<10} | {'Equal-Weight':<12} | {'Excess vs CSI':<13} | {'Excess vs EW':<12}")
+    report.append("--------------------------------------------------------------------------")
+    
+    df_reg['year'] = df_reg['trade_date_str'].str[:4]
+    years = sorted(df_reg['year'].unique())
+    for y in years:
+        df_year = df_reg[df_reg['year'] == y]
+        strat_ret_y = (1 + df_year['Strategy_Ret']).prod() - 1
+        csi1000_ret_y = (1 + df_year['CSI1000_Ret']).prod() - 1
+        ew_ret_y = (1 + df_year['R_m']).prod() - 1
+        
+        excess_csi = strat_ret_y - csi1000_ret_y
+        excess_ew = strat_ret_y - ew_ret_y
+        report.append(f"{y:<6} | {strat_ret_y:<10.2%} | {csi1000_ret_y:<10.2%} | {ew_ret_y:<12.2%} | {excess_csi:<+13.2%} | {excess_ew:<+12.2%}")
+        
     report.append("==========================================================================")
     
     report_text = "\n".join(report)
@@ -171,7 +213,7 @@ def run_attribution():
         f.write(report_text)
     print(f"Saved attribution report to {REPORT_FILE}")
     
-    # 6. 计算纯 Alpha 曲线 (Cumulative Residual Return)
+    # 7. 计算纯 Alpha 曲线 (Cumulative Residual Return)
     # 使用 Model 2 的残差来绘制纯净超额收益
     df_reg['Residual'] = model2.resid
     df_reg['Alpha_NAV'] = (1 + df_reg['Residual']).cumprod()
@@ -180,11 +222,9 @@ def run_attribution():
     plt.style.use('seaborn-v0_8-whitegrid' if 'seaborn-v0_8-whitegrid' in plt.style.available else 'default')
     fig, ax = plt.subplots(figsize=(12, 6))
     
-    # 转换为 datetime 索引用于绘图
     dates = pd.to_datetime(df_reg['trade_date_str'])
     
     ax.plot(dates, df_reg['Alpha_NAV'], label='Cumulative Residual (Pure Alpha)', color='#e65100', linewidth=2.5)
-    # 对比 Strategy Pure NAV
     df_nav_aligned = df_nav.loc[dates]
     ax.plot(dates, df_nav_aligned['Strategy_Pure'] / INITIAL_CAPITAL, label='Strategy (Pure Multi-Factor NAV)', color='#1565c0', linewidth=1.5, alpha=0.6)
     
@@ -199,6 +239,5 @@ def run_attribution():
     plt.close()
 
 if __name__ == '__main__':
-    # 从 step4 获取参数
     from step4_portfolio_backtest import INITIAL_CAPITAL
     run_attribution()

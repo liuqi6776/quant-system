@@ -4,7 +4,7 @@
 Backtest Period: 20220104 to 20260311 (1011 trading days)
 ==========================================================================
 
-[Model 1: Market & Size Factor Regression]
+[Model 1: Market & Size Factor Regression (Standard)]
 Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + e
 --------------------------------------------------------------------------
 Daily Alpha (Intercept): +0.000364
@@ -16,18 +16,18 @@ Beta Size (beta_s):      0.2010 (t-stat: 10.56)
 R-squared:               0.7336 (Style explains 73.36% of variance)
 
 ==========================================================================
-[Model 2: Market, Size & Industry Factors Regression]
-Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + sum(beta_i * R_ind_i) + e
+[Model 2: Market, Size & Orthogonalized Industry Excess Regression]
+Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + sum(beta_i * (R_ind_i - R_m)) + e
 --------------------------------------------------------------------------
 Daily Alpha (Intercept): +0.000472
 Annualized Alpha:        +11.90%
 t-statistic of Alpha:    2.3643 (SIGNIFICANT)
 p-value of Alpha:        0.018277
-Beta Market (beta_m):    4.9424 (t-stat: 4.64)
+Beta Market (beta_m):    0.7541 (t-stat: 30.45)
 Beta Size (beta_s):      0.1074 (t-stat: 1.82)
 R-squared:               0.7855 (Style explains 78.55% of variance)
 
-Significant Industry Exposures (p < 0.05):
+Significant Active Industry Exposures (p < 0.05):
   - 中成药: beta = -0.0992 (t-stat: -2.50, p-val: 0.0125)
   - 乳制品: beta = -0.0589 (t-stat: -2.09, p-val: 0.0365)
   - 互联网: beta = -0.0719 (t-stat: -2.17, p-val: 0.0301)
@@ -61,4 +61,15 @@ Significant Industry Exposures (p < 0.05):
   - 软件服务: beta = -0.1201 (t-stat: -2.91, p-val: 0.0037)
   - 通信设备: beta = -0.1419 (t-stat: -3.33, p-val: 0.0009)
   - 饲料: beta = -0.0657 (t-stat: -2.13, p-val: 0.0333)
+
+==========================================================================
+                   Year-by-Year Strategy Performance                      
+==========================================================================
+Year   | Strategy   | CSI 1000   | Equal-Weight | Excess vs CSI | Excess vs EW
+--------------------------------------------------------------------------
+2022   | -6.92%     | -21.31%    | -5.30%       | +14.39%       | -1.62%      
+2023   | 11.06%     | -6.28%     | 3.87%        | +17.34%       | +7.19%      
+2024   | -0.33%     | 1.20%      | 3.34%        | -1.53%        | -3.67%      
+2025   | 48.48%     | 27.49%     | 32.48%       | +20.99%       | +15.99%     
+2026   | 4.56%      | 10.11%     | 9.14%        | -5.56%        | -4.59%      
 ==========================================================================
