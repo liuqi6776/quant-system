@@ -1,0 +1,2 @@
+# Ignore data folder containing raw parquets and intermediate csvs
+data/
