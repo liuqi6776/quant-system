@@ -1,2 +1,4 @@
-# Ignore data folder containing raw parquets and intermediate csvs
-data/
+# Ignore large raw data files and daily folder
+data/daily/
+data/*.parquet
+data/max_pain_features.csv
