@@ -72,6 +72,14 @@ FACTORS = {
 }
 
 def calculate_ic_metrics(df, target_col, restrict_to_ths_dates=False, ths_dates=None):
+    # Auto-detect Vibe-Trading Alpha factors from the dataframe
+    vibe_cols = [c for c in df.columns if (c.startswith('alpha101_') or c.startswith('gtja191_') or c.startswith('gtja_') or c.startswith('alpha_')) and c not in FACTORS]
+    for c in vibe_cols:
+        if 'alpha' in c.lower():
+            FACTORS[c] = 'Alpha101_Vibe'
+        else:
+            FACTORS[c] = 'GTJA191_Vibe'
+
     period_name = "THS Valid Period" if restrict_to_ths_dates else "Full Period"
     print(f"\n--- Calculating Rank IC metrics against {target_col} ({period_name}) ---")
     

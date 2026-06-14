@@ -16,6 +16,7 @@ DATA_DIR = os.path.join(PROJECT_DIR, 'data')
 import sys
 sys.path.append(PROJECT_DIR)
 from features.alpha_factors import calculate_alpha101_factors
+from features.vibe_alpha_zoo import calculate_vibe_alphas
 
 # 原始 004 数据路径
 SRC_FEAT = r'C:\Users\liuqi\quant_system_v2\research\study_004_1d_release\data\all_features_v2.parquet'
@@ -52,6 +53,10 @@ def prepare_labels():
     # 计算 Alpha 101 因子
     print("Calculating Alpha 101 factors...")
     df = calculate_alpha101_factors(df)
+    
+    # 计算 Vibe-Trading Alpha Zoo
+    print("Calculating Vibe-Trading Alpha Zoo factors...")
+    df = calculate_vibe_alphas(df, num_factors=40)
     
     # 加载行业映射
     ind_file = os.path.join(DATA_DIR, 'industry_map.csv')

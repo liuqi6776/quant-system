@@ -20,6 +20,18 @@ from typing import List, Optional
 import warnings
 warnings.filterwarnings('ignore')
 
+try:
+    from features.vibe_alpha_zoo import calculate_vibe_alphas
+except ImportError:
+    # Handle the case where it might be run from a different directory
+    import sys, os
+    sys.path.append(os.path.dirname(os.path.dirname(__file__)))
+    try:
+        from features.vibe_alpha_zoo import calculate_vibe_alphas
+    except ImportError:
+        calculate_vibe_alphas = None
+
+
 
 # ==================== 辅助函数 ====================
 
@@ -589,6 +601,10 @@ def calculate_all_enhanced_features(
     # 8. 筹码分布
     if chip_df is not None:
         df = integrate_chip_data(df, chip_df)
+    
+    # 9. Vibe-Trading Alpha Zoo
+    if calculate_vibe_alphas is not None:
+        df = calculate_vibe_alphas(df, num_factors=40)
     
     # 填充NaN
     numeric_cols = df.select_dtypes(include=[np.number]).columns
