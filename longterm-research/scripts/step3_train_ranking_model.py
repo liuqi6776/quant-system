@@ -62,6 +62,43 @@ def get_feature_cols(df, exclude_config=None):
             and not c.startswith('hist_')
             and df[c].dtype in ('float64', 'float32', 'int64', 'int32')]
 
+def preprocess_factors(df, feature_cols):
+    """
+    Perform cross-sectional factor preprocessing:
+    1. Winsorize (1% - 99%)
+    2. Industry Neutralization (subtract industry mean)
+    3. Standardization (Z-score)
+    """
+    print("Preprocessing factors cross-sectionally (Winsorize, Neutralize, Standardize)...", flush=True)
+    
+    # 1. Winsorize 1% - 99%
+    print("  Applying Winsorization (1%-99%)...", flush=True)
+    q01 = df.groupby('trade_date')[feature_cols].quantile(0.01)
+    q99 = df.groupby('trade_date')[feature_cols].quantile(0.99)
+    df_trade_date = df['trade_date']
+    q01_aligned = q01.loc[df_trade_date].values
+    q99_aligned = q99.loc[df_trade_date].values
+    df[feature_cols] = np.clip(df[feature_cols].values, q01_aligned, q99_aligned)
+    
+    # 2. Industry Neutralization
+    if 'industry' in df.columns:
+        print("  Applying Industry Neutralization...", flush=True)
+        ind_means = df.groupby(['trade_date', 'industry'])[feature_cols].transform('mean')
+        df[feature_cols] = df[feature_cols] - ind_means
+    
+    # 3. Standardization (Z-score)
+    print("  Applying Standardization (Z-score)...", flush=True)
+    date_means = df.groupby('trade_date')[feature_cols].transform('mean')
+    date_stds = df.groupby('trade_date')[feature_cols].transform('std')
+    date_stds = date_stds.replace(0, 1).fillna(1)
+    df[feature_cols] = (df[feature_cols] - date_means) / date_stds
+    
+    # Fill any remaining NaNs safely
+    df[feature_cols] = df[feature_cols].fillna(0)
+    print("Preprocessing complete.", flush=True)
+    return df
+
+
 def train_and_predict(feature_config='B', output_file=OUTPUT_FILE, start_month='202201'):
     t0 = time.time()
     print(f"Starting train_and_predict with Config: {feature_config}...", flush=True)
@@ -80,14 +117,13 @@ def train_and_predict(feature_config='B', output_file=OUTPUT_FILE, start_month='
     
     # 根据配置过滤特征列
     extra_excludes = set()
+    vibe_cols = [c for c in df.columns if c.startswith('alpha101_') or c.startswith('gtja191_')]
+    
     if feature_config == 'A':
-        # Baseline: 排除 THS 评分 和 所有新闻相关特征
-        extra_excludes.update(['ths_hot_score', 'news_stock_impact', 'news_market_impact', 'news_has_mention', 'new_gs', 'new_bs', 'new_gi'])
+        # Baseline: 排除所有新引入的 Vibe 因子
+        extra_excludes.update(vibe_cols)
     elif feature_config == 'B':
-        # Baseline + News (当前默认策略): 排除 THS 评分
-        extra_excludes.add('ths_hot_score')
-    elif feature_config == 'C':
-        # Baseline + News + THS: 包含所有
+        # Baseline + Vibe: 包含 Vibe 因子
         pass
     else:
         raise ValueError(f"Unknown feature_config: {feature_config}")
@@ -95,6 +131,9 @@ def train_and_predict(feature_config='B', output_file=OUTPUT_FILE, start_month='
     feature_cols = get_feature_cols(df, exclude_config=extra_excludes)
     print(f"Total rows: {len(df)}")
     print(f"Number of feature columns: {len(feature_cols)}", flush=True)
+    
+    # 统一横截面因子预处理
+    df = preprocess_factors(df, feature_cols)
     
     # 划分预测月度
     months = sorted(df['ds'].str[:6].unique())
@@ -164,13 +203,10 @@ def train_and_predict(feature_config='B', output_file=OUTPUT_FILE, start_month='
         
         # 8. 训练模型与预测
         if MODEL_TYPE == 'linear':
-            scaler = StandardScaler()
-            X_train_scaled = scaler.fit_transform(X_train)
-            X_test_scaled = scaler.transform(X_test)
-            
+            # 注意：数据已经过横截面标准化，无需再进行全量 StandardScaler
             model = Ridge(alpha=RIDGE_ALPHA)
-            model.fit(X_train_scaled, y_train)
-            pred_scores = model.predict(X_test_scaled)
+            model.fit(X_train, y_train)
+            pred_scores = model.predict(X_test)
         elif MODEL_TYPE == 'xgb':
             model = XGBRegressor(
                 n_estimators=100,

@@ -1,12 +1,11 @@
 """
 run_incremental_test.py
 增量因子评估与风格归因对比主脚本。
-1. 分别训练并预测三种特征配置（202409 至 202603）：
-   - Config A (Baseline): 仅使用基础长周期技术与动量因子（剔除 ths_hot_score 与 news_stock_impact 等所有新闻因子）
-   - Config B (Baseline + News): 在 A 的基础上加入新闻舆情因子（当前的默认策略配置）
-   - Config C (Baseline + News + THS): 在 B 的基础上加入 ths_hot_score 因子（结合了 0.0 中性缺失值处理）
+1. 分别训练并预测两种特征配置（202409 至 202603）：
+   - Config A (Baseline): 包含原有的所有特征 (包括新闻、舆情等)，但不包含 Vibe Alpha 因子。
+   - Config B (Baseline + Vibe): 在 A 的基础上加入经过预处理的 Vibe Alpha 因子。
 2. 运行高回真度组合回测，输出每日净值序列。
-3. 对三种策略在相同的评估期（2024-09-01 至 2026-03-11）进行 Model 2 风格归因线性回归。
+3. 对两种策略在相同的评估期（2024-09-01 至 2026-03-11）进行 Model 2 风格归因线性回归。
 4. 比较它们的年化 Alpha、t 统计量、R-squared、总收益和夏普比率。
 5. 生成详细对比报告。
 """
@@ -34,11 +33,9 @@ from step4_portfolio_backtest import run_backtest, INITIAL_CAPITAL
 # 文件定义
 PRED_FILE_A = os.path.join(PRED_DIR, 'predictions_config_A.parquet')
 PRED_FILE_B = os.path.join(PRED_DIR, 'predictions_config_B.parquet')
-PRED_FILE_C = os.path.join(PRED_DIR, 'predictions_config_C.parquet')
 
 RES_DIR_A = os.path.join(RESULTS_DIR, 'config_A')
 RES_DIR_B = os.path.join(RESULTS_DIR, 'config_B')
-RES_DIR_C = os.path.join(RESULTS_DIR, 'config_C')
 
 REPORT_FILE = os.path.join(RESULTS_DIR, 'incremental_test_report.txt')
 FEATURES_FILE = os.path.join(DATA_DIR, 'features_longterm.parquet')
@@ -107,13 +104,11 @@ def main():
     print("\n>>> Step 1: Running monthly rolling Walk-Forward training for Configs...")
     train_and_predict(feature_config='A', output_file=PRED_FILE_A, start_month='202409')
     train_and_predict(feature_config='B', output_file=PRED_FILE_B, start_month='202409')
-    train_and_predict(feature_config='C', output_file=PRED_FILE_C, start_month='202409')
     
     # 2. 运行回测系统，输出每日 NAV 数据
     print("\n>>> Step 2: Running Portfolio Backtests for Configs...")
     run_backtest(pred_file=PRED_FILE_A, results_dir=RES_DIR_A, save_plot=False)
     run_backtest(pred_file=PRED_FILE_B, results_dir=RES_DIR_B, save_plot=False)
-    run_backtest(pred_file=PRED_FILE_C, results_dir=RES_DIR_C, save_plot=False)
     
     # 3. 准备回归自变量
     print("\n>>> Step 3: Extracting daily control factors (R_m, SMB, Industries)...")
@@ -161,10 +156,6 @@ def main():
         os.path.join(RES_DIR_B, 'portfolio_comparison_nav.csv'),
         start_date, end_date, df_mkt, df_smb, df_ind, ind_cols
     )
-    results['Config_C'] = run_regression_for_config(
-        os.path.join(RES_DIR_C, 'portfolio_comparison_nav.csv'),
-        start_date, end_date, df_mkt, df_smb, df_ind, ind_cols
-    )
     
     # 5. 输出对比报告
     report = []
@@ -174,42 +165,35 @@ def main():
     report.append(f"Comparison Period: {start_date} to {end_date} (Features Active)")
     report.append("Regresion Model: Model 2 (Market + SMB + Orthogonalized Industry Excess)")
     report.append("==========================================================================")
-    report.append(f"{'Metric':<25} | {'Config A (Baseline)':<20} | {'Config B (+News)':<20} | {'Config C (+News+THS)':<20}")
+    report.append(f"{'Metric':<25} | {'Config A (Baseline)':<25} | {'Config B (+Vibe Alphas)':<25}")
     report.append("--------------------------------------------------------------------------")
     
     # 收益指标
-    report.append(f"{'Total Return':<25} | {results['Config_A']['total_return']:<20.2%} | {results['Config_B']['total_return']:<20.2%} | {results['Config_C']['total_return']:<20.2%}")
-    report.append(f"{'Sharpe Ratio':<25} | {results['Config_A']['sharpe']:<20.2f} | {results['Config_B']['sharpe']:<20.2f} | {results['Config_C']['sharpe']:<20.2f}")
-    report.append(f"{'Max Drawdown':<25} | {results['Config_A']['max_drawdown']:<20.2%} | {results['Config_B']['max_drawdown']:<20.2%} | {results['Config_C']['max_drawdown']:<20.2%}")
+    report.append(f"{'Total Return':<25} | {results['Config_A']['total_return']:<25.2%} | {results['Config_B']['total_return']:<25.2%}")
+    report.append(f"{'Sharpe Ratio':<25} | {results['Config_A']['sharpe']:<25.2f} | {results['Config_B']['sharpe']:<25.2f}")
+    report.append(f"{'Max Drawdown':<25} | {results['Config_A']['max_drawdown']:<25.2%} | {results['Config_B']['max_drawdown']:<25.2%}")
     
     # 回归指标
     report.append("--------------------------------------------------------------------------")
-    report.append(f"{'Annualized Alpha':<25} | {results['Config_A']['alpha_ann']:<20.2%} | {results['Config_B']['alpha_ann']:<20.2%} | {results['Config_C']['alpha_ann']:<20.2%}")
-    report.append(f"{'Alpha t-statistic':<25} | {results['Config_A']['t_stat']:<20.4f} | {results['Config_B']['t_stat']:<20.4f} | {results['Config_C']['t_stat']:<20.4f}")
-    report.append(f"{'Alpha p-value':<25} | {results['Config_A']['p_value']:<20.6f} | {results['Config_B']['p_value']:<20.6f} | {results['Config_C']['p_value']:<20.6f}")
-    report.append(f"{'Beta Market (beta_m)':<25} | {results['Config_A']['beta_m']:<20.4f} | {results['Config_B']['beta_m']:<20.4f} | {results['Config_C']['beta_m']:<20.4f}")
-    report.append(f"{'Beta Size (beta_s)':<25} | {results['Config_A']['beta_s']:<20.4f} | {results['Config_B']['beta_s']:<20.4f} | {results['Config_C']['beta_s']:<20.4f}")
-    report.append(f"{'R-squared':<25} | {results['Config_A']['r2']:<20.2%} | {results['Config_B']['r2']:<20.2%} | {results['Config_C']['r2']:<20.2%}")
+    report.append(f"{'Annualized Alpha':<25} | {results['Config_A']['alpha_ann']:<25.2%} | {results['Config_B']['alpha_ann']:<25.2%}")
+    report.append(f"{'Alpha t-statistic':<25} | {results['Config_A']['t_stat']:<25.4f} | {results['Config_B']['t_stat']:<25.4f}")
+    report.append(f"{'Alpha p-value':<25} | {results['Config_A']['p_value']:<25.6f} | {results['Config_B']['p_value']:<25.6f}")
+    report.append(f"{'Beta Market (beta_m)':<25} | {results['Config_A']['beta_m']:<25.4f} | {results['Config_B']['beta_m']:<25.4f}")
+    report.append(f"{'Beta Size (beta_s)':<25} | {results['Config_A']['beta_s']:<25.4f} | {results['Config_B']['beta_s']:<25.4f}")
+    report.append(f"{'R-squared':<25} | {results['Config_A']['r2']:<25.2%} | {results['Config_B']['r2']:<25.2%}")
     report.append("==========================================================================")
     
     # 因子分析结论
     report.append("\nEmpirical Conclusions:")
     # A vs B
-    news_alpha_diff = results['Config_B']['alpha_ann'] - results['Config_A']['alpha_ann']
-    t_news_sig = "SIGNIFICANT" if results['Config_B']['p_value'] < 0.05 else "NOT SIGNIFICANT"
-    report.append(f"1. News Factor Incremental Value (Config B vs A):")
-    report.append(f"   - Annualized Alpha change: {news_alpha_diff:+.2%}")
+    vibe_alpha_diff = results['Config_B']['alpha_ann'] - results['Config_A']['alpha_ann']
+    report.append(f"1. Preprocessed Vibe Alphas Incremental Value (Config B vs A):")
+    report.append(f"   - Annualized Alpha change: {vibe_alpha_diff:+.2%}")
     report.append(f"   - Alpha t-stat: A = {results['Config_A']['t_stat']:.2f} ({'sig' if results['Config_A']['p_value'] < 0.05 else 'not sig'}) | B = {results['Config_B']['t_stat']:.2f} ({'sig' if results['Config_B']['p_value'] < 0.05 else 'not sig'})")
     
-    # B vs C
-    ths_alpha_diff = results['Config_C']['alpha_ann'] - results['Config_B']['alpha_ann']
-    report.append(f"2. THS Rank Factor Incremental Value (Config C vs B):")
-    report.append(f"   - Annualized Alpha change: {ths_alpha_diff:+.2%}")
-    report.append(f"   - Alpha t-stat: B = {results['Config_B']['t_stat']:.2f} ({'sig' if results['Config_B']['p_value'] < 0.05 else 'not sig'}) | C = {results['Config_C']['t_stat']:.2f} ({'sig' if results['Config_C']['p_value'] < 0.05 else 'not sig'})")
-    
-    r2_explain = results['Config_C']['r2']
-    report.append(f"3. Style Explanation:")
-    report.append(f"   - Config C's style/industry R2 is {r2_explain:.2%}, meaning style exposures explain the vast majority of daily return fluctuations.")
+    r2_explain = results['Config_B']['r2']
+    report.append(f"\n2. Style Explanation:")
+    report.append(f"   - Config B's style/industry R2 is {r2_explain:.2%}, meaning style exposures explain the vast majority of daily return fluctuations.")
     report.append("==========================================================================")
     
     report_text = "\n".join(report)

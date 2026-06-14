@@ -7,69 +7,59 @@ Backtest Period: 20220104 to 20260311 (1011 trading days)
 [Model 1: Market & Size Factor Regression (Standard)]
 Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + e
 --------------------------------------------------------------------------
-Daily Alpha (Intercept): +0.000364
-Annualized Alpha:        +9.18%
-t-statistic of Alpha:    1.9265 (NOT SIGNIFICANT)
-p-value of Alpha:        0.054317
-Beta Market (beta_m):    0.6474 (t-stat: 42.84)
-Beta Size (beta_s):      0.2010 (t-stat: 10.56)
-R-squared:               0.7336 (Style explains 73.36% of variance)
+Daily Alpha (Intercept): +0.000152
+Annualized Alpha:        +3.83%
+t-statistic of Alpha:    0.8274 (NOT SIGNIFICANT)
+p-value of Alpha:        0.408185
+Beta Market (beta_m):    0.6769 (t-stat: 46.17)
+Beta Size (beta_s):      0.2139 (t-stat: 11.58)
+R-squared:               0.7626 (Style explains 76.26% of variance)
 
 ==========================================================================
 [Model 2: Market, Size & Orthogonalized Industry Excess Regression]
 Formula: R_strategy = alpha + beta_m * R_m + beta_s * SMB + sum(beta_i * (R_ind_i - R_m)) + e
 --------------------------------------------------------------------------
-Daily Alpha (Intercept): +0.000472
-Annualized Alpha:        +11.90%
-t-statistic of Alpha:    2.3643 (SIGNIFICANT)
-p-value of Alpha:        0.018277
-Beta Market (beta_m):    0.7541 (t-stat: 30.45)
-Beta Size (beta_s):      0.1074 (t-stat: 1.82)
-R-squared:               0.7855 (Style explains 78.55% of variance)
+Daily Alpha (Intercept): +0.000123
+Annualized Alpha:        +3.10%
+t-statistic of Alpha:    0.6410 (NOT SIGNIFICANT)
+p-value of Alpha:        0.521716
+Beta Market (beta_m):    0.7426 (t-stat: 31.22)
+Beta Size (beta_s):      0.1817 (t-stat: 3.20)
+R-squared:               0.8127 (Style explains 81.27% of variance)
 
 Significant Active Industry Exposures (p < 0.05):
-  - 中成药: beta = -0.0992 (t-stat: -2.50, p-val: 0.0125)
-  - 乳制品: beta = -0.0589 (t-stat: -2.09, p-val: 0.0365)
-  - 互联网: beta = -0.0719 (t-stat: -2.17, p-val: 0.0301)
-  - 仓储物流: beta = -0.0846 (t-stat: -2.34, p-val: 0.0195)
-  - 元器件: beta = -0.1484 (t-stat: -2.59, p-val: 0.0097)
-  - 全国地产: beta = -0.1015 (t-stat: -2.72, p-val: 0.0067)
-  - 其他商业: beta = -0.0530 (t-stat: -2.36, p-val: 0.0187)
-  - 其他建材: beta = -0.0754 (t-stat: -2.12, p-val: 0.0343)
-  - 农药化肥: beta = -0.0937 (t-stat: -2.25, p-val: 0.0247)
-  - 出版业: beta = -0.0527 (t-stat: -2.29, p-val: 0.0225)
-  - 化工原料: beta = -0.2080 (t-stat: -2.75, p-val: 0.0061)
-  - 半导体: beta = -0.0758 (t-stat: -3.06, p-val: 0.0022)
-  - 商品城: beta = -0.0446 (t-stat: -2.46, p-val: 0.0140)
-  - 商贸代理: beta = +0.0686 (t-stat: 2.24, p-val: 0.0255)
-  - 家用电器: beta = -0.1359 (t-stat: -2.95, p-val: 0.0033)
-  - 建筑工程: beta = -0.1243 (t-stat: -2.72, p-val: 0.0066)
-  - 文教休闲: beta = -0.0735 (t-stat: -2.26, p-val: 0.0239)
-  - 旅游景点: beta = -0.0687 (t-stat: -3.11, p-val: 0.0020)
-  - 机床制造: beta = -0.0728 (t-stat: -3.69, p-val: 0.0002)
-  - 机械基件: beta = -0.1093 (t-stat: -2.16, p-val: 0.0313)
-  - 水力发电: beta = -0.0929 (t-stat: -2.74, p-val: 0.0062)
-  - 汽车配件: beta = -0.2231 (t-stat: -3.63, p-val: 0.0003)
-  - 焦炭加工: beta = -0.0415 (t-stat: -2.16, p-val: 0.0308)
-  - 环境保护: beta = -0.1169 (t-stat: -2.36, p-val: 0.0186)
-  - 电气设备: beta = -0.2237 (t-stat: -3.31, p-val: 0.0010)
-  - 白酒: beta = -0.0566 (t-stat: -2.55, p-val: 0.0108)
-  - 种植业: beta = -0.0562 (t-stat: -2.83, p-val: 0.0048)
-  - 纺织: beta = -0.1046 (t-stat: -2.56, p-val: 0.0105)
-  - 装修装饰: beta = +0.0694 (t-stat: 2.34, p-val: 0.0195)
-  - 证券: beta = -0.1114 (t-stat: -3.49, p-val: 0.0005)
-  - 软件服务: beta = -0.1201 (t-stat: -2.91, p-val: 0.0037)
-  - 通信设备: beta = -0.1419 (t-stat: -3.33, p-val: 0.0009)
-  - 饲料: beta = -0.0657 (t-stat: -2.13, p-val: 0.0333)
+  - 中成药: beta = -0.0868 (t-stat: -2.28, p-val: 0.0229)
+  - 仓储物流: beta = -0.0715 (t-stat: -2.06, p-val: 0.0396)
+  - 保险: beta = +0.0606 (t-stat: 3.38, p-val: 0.0007)
+  - 全国地产: beta = -0.0820 (t-stat: -2.29, p-val: 0.0224)
+  - 其他商业: beta = -0.0500 (t-stat: -2.31, p-val: 0.0209)
+  - 出版业: beta = -0.0487 (t-stat: -2.20, p-val: 0.0280)
+  - 半导体: beta = -0.0649 (t-stat: -2.73, p-val: 0.0064)
+  - 商品城: beta = -0.0347 (t-stat: -2.00, p-val: 0.0463)
+  - 商贸代理: beta = +0.0922 (t-stat: 3.13, p-val: 0.0018)
+  - 旅游景点: beta = -0.0461 (t-stat: -2.17, p-val: 0.0303)
+  - 水泥: beta = -0.0950 (t-stat: -3.09, p-val: 0.0021)
+  - 汽车配件: beta = -0.1350 (t-stat: -2.29, p-val: 0.0223)
+  - 环境保护: beta = -0.1226 (t-stat: -2.57, p-val: 0.0102)
+  - 电气设备: beta = -0.1505 (t-stat: -2.32, p-val: 0.0204)
+  - 白酒: beta = -0.0425 (t-stat: -1.99, p-val: 0.0465)
+  - 石油开采: beta = -0.0442 (t-stat: -2.05, p-val: 0.0409)
+  - 种植业: beta = -0.0506 (t-stat: -2.65, p-val: 0.0082)
+  - 证券: beta = -0.0998 (t-stat: -3.25, p-val: 0.0012)
+  - 路桥: beta = +0.0941 (t-stat: 2.78, p-val: 0.0055)
+  - 软件服务: beta = -0.0802 (t-stat: -2.02, p-val: 0.0434)
+  - 软饮料: beta = +0.0544 (t-stat: 2.22, p-val: 0.0266)
+  - 通信设备: beta = -0.0999 (t-stat: -2.44, p-val: 0.0149)
+  - 食品: beta = -0.1010 (t-stat: -2.01, p-val: 0.0453)
 
 ==========================================================================
                    Year-by-Year Strategy Performance                      
 ==========================================================================
 Year   | Strategy   | CSI 1000   | Equal-Weight | Excess vs CSI | Excess vs EW
 --------------------------------------------------------------------------
-2022   | -6.92%     | -21.31%    | -5.30%       | +14.39%       | -1.62%      
-2023   | 11.06%     | -6.28%     | 3.87%        | +17.34%       | +7.19%      
-2024   | -0.33%     | 1.20%      | 3.34%        | -1.53%        | -3.67%      
-2025   | 48.48%     | 27.49%     | 32.48%       | +20.99%       | +15.99%     
-2026   | 4.56%      | 10.11%     | 9.14%        | -5.56%        | -4.59%      
+2022   | -9.42%     | -21.31%    | -5.30%       | +11.89%       | -4.12%      
+2023   | 7.09%      | -6.28%     | 3.87%        | +13.36%       | +3.21%      
+2024   | -10.29%    | 1.20%      | 3.34%        | -11.49%       | -13.63%     
+2025   | 41.77%     | 27.49%     | 32.48%       | +14.28%       | +9.28%      
+2026   | 4.71%      | 10.11%     | 9.14%        | -5.40%        | -4.43%      
 ==========================================================================
