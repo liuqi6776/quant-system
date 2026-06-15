@@ -125,6 +125,18 @@ def load_backtest_data(ma_window=50, val_window=1400):
         })
         
     df_unified = pd.DataFrame(rows).sort_values('trade_date').reset_index(drop=True)
+    
+    # Load QVIX daily if exists
+    qvix_path = os.path.join(DATA_DIR, 'qvix_daily.csv')
+    if os.path.exists(qvix_path):
+        df_qvix = pd.read_csv(qvix_path)
+        df_qvix['trade_date'] = pd.to_datetime(df_qvix['date'].astype(str))
+        df_qvix = df_qvix[['trade_date', 'close']].rename(columns={'close': 'qvix'})
+        df_unified = pd.merge(df_unified, df_qvix, on='trade_date', how='left')
+        df_unified['qvix'] = df_unified['qvix'].ffill().bfill().fillna(20.0)
+    else:
+        df_unified['qvix'] = 20.0
+        
     return df_unified
 
 def run_option_backtest(df_period, buy_put=False, strike_ratio=0.97, iv=0.20, initial_capital=1000000.0):
@@ -266,7 +278,8 @@ def run_option_backtest(df_period, buy_put=False, strike_ratio=0.97, iv=0.20, in
                     r = (row[f'yield_10y_{asset}'] / 100.0) if not pd.isna(row[f'yield_10y_{asset}']) else 0.025
                     
                     # Compute BS Put Price
-                    put_price_per_share = bs_put_price(S0, K, T_years, r, iv)
+                    current_iv = (row['qvix'] / 100.0) if iv == 'qvix' else iv
+                    put_price_per_share = bs_put_price(S0, K, T_years, r, current_iv)
                     pct_premium = put_price_per_share / S0
                     
                     # Option Cost
