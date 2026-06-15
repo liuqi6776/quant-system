@@ -1,0 +1,6 @@
+Strategy,Total Return,CAGR,Volatility,Sharpe,Max Drawdown
+Fast Momentum Only (Base),51.71%,21.99%,14.39%,1.52,-9.24%
+"Option-Protected (ATM, 1.00)",49.56%,21.16%,14.44%,1.47,-9.24%
+"Option-Protected (3% OTM, 0.97)",49.45%,21.12%,14.39%,1.47,-9.24%
+"Option-Protected (5% OTM, 0.95)",50.24%,21.42%,14.38%,1.49,-9.24%
+HS300 Buy & Hold,45.89%,19.73%,18.09%,1.04,-15.66%
