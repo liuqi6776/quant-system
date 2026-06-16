@@ -445,14 +445,14 @@ def main():
     df_grid = run_grid_search(df_is, df_oos)
     
     # Find parameter set based ONLY on In-Sample performance to prevent OOS leakage
-    # Target criteria: Maximize In-Sample Sharpe Ratio subject to In-Sample MDD >= -14% (absolute MDD <= 14%)
-    valid = df_grid[df_grid['is_mdd'] >= -0.14]
+    # Target criteria: Maximize In-Sample CAGR subject to In-Sample MDD >= -12% (absolute MDD <= 12%)
+    valid = df_grid[df_grid['is_mdd'] >= -0.12]
     
     if valid.empty:
-        print("No parameter set met the In-Sample MDD constraint. Selecting the one with the highest In-Sample Sharpe Ratio...")
-        best_row = df_grid.sort_values(by='is_sharpe', ascending=False).iloc[0]
+        print("No parameter set met the In-Sample MDD constraint of -12%. Selecting the one with the highest In-Sample CAGR...")
+        best_row = df_grid.sort_values(by='is_cagr', ascending=False).iloc[0]
     else:
-        best_row = valid.sort_values(by='is_sharpe', ascending=False).iloc[0]
+        best_row = valid.sort_values(by='is_cagr', ascending=False).iloc[0]
         
     best_vt = best_row['vol_target']
     best_v_tilt = best_row['val_tilt']
