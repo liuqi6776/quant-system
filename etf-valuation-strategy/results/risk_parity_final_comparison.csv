@@ -1,7 +1,7 @@
 Period,Strategy,CAGR,Volatility,Sharpe,Max Drawdown,Calmar
-In-Sample,Risk Parity (VT+Timing+Put),4.99%,5.54%,0.94,-6.45%,0.77
+In-Sample,Risk Parity (VT+Timing+Put),3.87%,4.15%,0.97,-4.82%,0.80
 In-Sample,8-Asset Equal Weight,4.57%,14.23%,0.40,-32.11%,0.14
 In-Sample,HS300 Buy & Hold,-0.90%,22.21%,0.05,-46.70%,-0.02
-Out-of-Sample,Risk Parity (VT+Timing+Put),10.96%,5.00%,2.22,-3.94%,2.78
+Out-of-Sample,Risk Parity (VT+Timing+Put),8.97%,4.30%,2.13,-3.78%,2.37
 Out-of-Sample,8-Asset Equal Weight,23.06%,12.97%,1.75,-9.11%,2.53
 Out-of-Sample,HS300 Buy & Hold,19.73%,18.09%,1.04,-15.66%,1.26

@@ -444,20 +444,15 @@ def main():
     # Run Grid Search for Robustness
     df_grid = run_grid_search(df_is, df_oos)
     
-    # Find parameter set that fits target: In-sample MDD > -14%, OOS MDD > -12%, and maximizes Sharpe / CAGR
-    # Target criteria: CAGR >= 7.5% in IS, MDD >= -14% in IS, MDD >= -12% in OOS
-    valid = df_grid[
-        (df_grid['is_mdd'] >= -0.14) & 
-        (df_grid['oos_mdd'] >= -0.12) & 
-        (df_grid['is_cagr'] >= 0.075)
-    ]
+    # Find parameter set based ONLY on In-Sample performance to prevent OOS leakage
+    # Target criteria: Maximize In-Sample Sharpe Ratio subject to In-Sample MDD >= -14% (absolute MDD <= 14%)
+    valid = df_grid[df_grid['is_mdd'] >= -0.14]
     
     if valid.empty:
-        print("No parameter set perfectly met the strict MDD targets. Finding the set with highest Calmar ratio in OOS...")
-        best_row = df_grid.sort_values(by='oos_calmar', ascending=False).iloc[0]
+        print("No parameter set met the In-Sample MDD constraint. Selecting the one with the highest In-Sample Sharpe Ratio...")
+        best_row = df_grid.sort_values(by='is_sharpe', ascending=False).iloc[0]
     else:
-        # Sort valid rows by OOS Sharpe Ratio
-        best_row = valid.sort_values(by='oos_sharpe', ascending=False).iloc[0]
+        best_row = valid.sort_values(by='is_sharpe', ascending=False).iloc[0]
         
     best_vt = best_row['vol_target']
     best_v_tilt = best_row['val_tilt']
