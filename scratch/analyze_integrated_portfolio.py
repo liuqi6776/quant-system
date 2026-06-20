@@ -2,61 +2,49 @@ import os
 import pandas as pd
 import numpy as np
 import sys
+import matplotlib
+matplotlib.use('Agg')
+import matplotlib.pyplot as plt
 
 # Define paths
 DATA_DIR = r"c:\Users\liuqi\quant_system_v2\etf-valuation-strategy\data"
-
-# Add the paths to python path
 SCRIPTS_DIR = r"c:\Users\liuqi\quant_system_v2\etf-valuation-strategy\scripts"
 sys.path.append(SCRIPTS_DIR)
 
+import step11_risk_parity_strategy as rp
+
 # Load daily stock PNL
-df_stock = pd.read_csv(os.path.join(DATA_DIR, 'daily_stock_pnl.csv'))
+pnl_file = os.path.join(DATA_DIR, 'daily_super_weekly_pnl.csv')
+if not os.path.exists(pnl_file):
+    print(f"Error: {pnl_file} not found. Please run generate_daily_super_weekly.py first.")
+    sys.exit(1)
+
+df_stock = pd.read_csv(pnl_file)
 df_stock['trade_date'] = pd.to_datetime(df_stock['trade_date'].astype(str))
 
-import step11_risk_parity_strategy as rp
 df_unified = rp.load_data_8assets(ma_window=200, val_window=1400, vol_lookback=60)
 
 # Merge daily stock strategy PNL
-df_all = pd.merge(df_unified, df_stock, on='trade_date', how='inner')
+df_all = pd.merge(df_unified, df_stock[['trade_date', 'pnl']], on='trade_date', how='inner')
 print(f"Merged dataset shape: {df_all.shape}, Dates: {df_all['trade_date'].min().strftime('%Y-%m-%d')} to {df_all['trade_date'].max().strftime('%Y-%m-%d')}")
 
 # 1. Compute correlations
 assets = ['hs300', 'zz500', 'chinext', 'div', 'gold', 'nasdaq', 'bond', 'cbond']
-data_rets = {}
-for a in assets:
-    data_rets[a] = df_all[f'ret_{a}']
-data_rets['daily_stock_opt'] = df_all['pnl_opt']
-data_rets['daily_stock_base'] = df_all['pnl_base']
+data_rets = {a: df_all[f'ret_{a}'] for a in assets}
+data_rets['active_stock'] = df_all['pnl']
 
 df_rets = pd.DataFrame(data_rets)
 corr = df_rets.corr()
-print("\nCorrelation matrix including Daily Stock Strategy:")
-print(corr[['daily_stock_opt', 'daily_stock_base']].round(3))
+print("\nCorrelation matrix including Super-Weekly Strategy:")
+print(corr[['active_stock']].round(3))
 
-# 2. Run Comparison Backtests (2022-2026)
-print("\nRunning backtests over the 2022-2026 period...")
-
-# Backtest 1: Baseline 8-asset Risk Parity Strategy (vol_target = 0.10, val_tilt = 0.0, strike_ratio = 0.95)
-print("1. Running Baseline 8-asset Risk Parity...")
-df_nav_base, _, _ = rp.run_backtest_risk_parity(
-    df_all, vol_target=0.10, val_tilt=0.0, strike_ratio=0.95, buy_put=True
-)
-metrics_base = rp.compute_metrics(df_nav_base['nav'])
-
-# Backtest 2: Replacement Portfolio
-# We replace hs300, zz500, chinext, div returns with daily_stock_opt in the backtest
-# In this backtest, the equity return is determined by the active Daily Stock Strategy
-def run_backtest_replaced_equity(df_period, vol_target=0.10, mult=1.0):
+# 2. Define Replacement Active Equity Portfolio Backtest
+def run_backtest_replaced_equity(df_period, vol_target=0.10):
     df_period = df_period.copy().reset_index(drop=True)
-    
-    # We replace stock returns in df_period with pnl_opt * mult
-    # and set their volatilities equal to pnl_opt's volatility
-    # This represents a portfolio containing: active stock picker, gold, nasdaq, bond, cbond
     active_assets = ['active_stock', 'gold', 'nasdaq', 'bond', 'cbond']
     
-    # Calculate rolling volatility for the active stock picker
-    df_period['ret_active_stock'] = df_period['pnl_opt'] * mult
+    # Scale active stock picker return (1.0x unscaled)
+    df_period['ret_active_stock'] = df_period['pnl']
     df_period['vol_active_stock'] = df_period['ret_active_stock'].rolling(window=60, min_periods=20).std().bfill()
     
     df_period['year_week'] = df_period['trade_date'].dt.strftime('%Y-%U')
@@ -123,11 +111,7 @@ def run_backtest_replaced_equity(df_period, vol_target=0.10, mult=1.0):
     df_nav = pd.DataFrame(nav_history).set_index('trade_date')
     return df_nav
 
-print("2. Running Replacement Active Equity Portfolio (Unscaled)...")
-df_nav_replace_1 = run_backtest_replaced_equity(df_all, vol_target=0.10, mult=1.0)
-metrics_replace_1 = rp.compute_metrics(df_nav_replace_1['nav'])
-
-# 3. 9-Asset Satellite Portfolio Backtest
+# 3. Define Active Satellite 9-Asset Risk Parity Backtest
 def run_backtest_9assets(
     df_period,
     vol_target=0.10,
@@ -139,8 +123,7 @@ def run_backtest_9assets(
     dev_threshold=0.05,
     initial_capital=1000000.0,
     rf_rate=0.02,
-    buy_put=True,
-    mult=1.0
+    buy_put=True
 ):
     if len(df_period) == 0:
         return None
@@ -151,8 +134,7 @@ def run_backtest_9assets(
     assets = ['hs300', 'zz500', 'chinext', 'div', 'gold', 'nasdaq', 'bond', 'cbond', 'active_stock']
     equity_assets = ['hs300', 'zz500', 'chinext', 'div']
     
-    # Calculate rolling volatility for the active stock picker (scaled by mult)
-    df_period['ret_active_stock'] = df_period['pnl_opt'] * mult
+    df_period['ret_active_stock'] = df_period['pnl']
     df_period['vol_active_stock'] = df_period['ret_active_stock'].rolling(window=vol_lookback, min_periods=20).std().bfill()
     
     df_period['year_week'] = df_period['trade_date'].dt.strftime('%Y-%U')
@@ -289,141 +271,142 @@ def run_backtest_9assets(
     df_nav = pd.DataFrame(nav_history).set_index('trade_date')
     return df_nav
 
-print("3. Running Active Satellite 9-asset Risk Parity (Unscaled)...")
-df_nav_satellite_1 = run_backtest_9assets(
-    df_all, vol_target=0.10, val_tilt=0.0, strike_ratio=0.95, buy_put=True, mult=1.0
-)
-metrics_satellite_1 = rp.compute_metrics(df_nav_satellite_1['nav'])
-
-# 4. Print Standalone Volatilities
-print("\n" + "="*80)
-print("  STANDALONE ASSET PERFORMANCE (2022-01-04 to 2026-03-11)")
-print("="*80)
-all_test_assets = ['hs300', 'zz500', 'chinext', 'div', 'gold', 'nasdaq', 'bond', 'cbond', 'pnl_opt']
-for a in all_test_assets:
-    ret_series = df_all[f'ret_{a}'] if f'ret_{a}' in df_all else df_all[a]
-    ann_ret = (ret_series + 1.0).prod() ** (252.0 / len(ret_series)) - 1.0
-    ann_vol = ret_series.std() * np.sqrt(252)
-    sharpe = ann_ret / ann_vol if ann_vol > 0 else 0.0
-    print(f"Asset: {a:12s} | Ann Return: {ann_ret:7.2%} | Ann Volatility: {ann_vol:7.2%} | Sharpe: {sharpe:5.2f}")
-print("="*80)
-
-# 5. Perform Multiplier Sweep
-print("\n" + "="*80)
-print("  PERFORMANCE SWEEP OVER STOCK PICKER MULTIPLIER (LEVERAGE)")
-print("="*80)
-multipliers = [1.0, 1.5, 2.0, 2.5, 3.0, 3.5, 4.0, 5.0]
-sweep_results = []
-for m in multipliers:
-    # Option B
-    df_b = run_backtest_replaced_equity(df_all, vol_target=0.10, mult=m)
-    m_b = rp.compute_metrics(df_b['nav'])
-    # Option C
-    df_c = run_backtest_9assets(df_all, vol_target=0.10, mult=m, buy_put=True)
-    m_c = rp.compute_metrics(df_c['nav'])
+def evaluate_and_plot():
+    # 1. Run Baseline (Option A)
+    print("1. Running Baseline 8-asset Risk Parity...")
+    df_nav_base, _, _ = rp.run_backtest_risk_parity(
+        df_all, vol_target=0.10, val_tilt=0.0, strike_ratio=0.95, buy_put=True
+    )
     
-    sweep_results.append({
-        'multiplier': m,
-        'b_cagr': m_b['CAGR'], 'b_vol': m_b['Volatility'], 'b_sharpe': m_b['Sharpe'], 'b_mdd': m_b['Max Drawdown'], 'b_calmar': m_b['Calmar'],
-        'c_cagr': m_c['CAGR'], 'c_vol': m_c['Volatility'], 'c_sharpe': m_c['Sharpe'], 'c_mdd': m_c['Max Drawdown'], 'c_calmar': m_c['Calmar']
-    })
+    # 2. Run Active Replacement (Option B)
+    print("2. Running Active Replacement (5-Asset)...")
+    df_nav_replace = run_backtest_replaced_equity(df_all, vol_target=0.10)
+    
+    # 3. Run Active Satellite (Option C)
+    print("3. Running Active Satellite (9-Asset)...")
+    df_nav_satellite = run_backtest_9assets(
+        df_all, vol_target=0.10, val_tilt=0.0, strike_ratio=0.95, buy_put=True
+    )
+    
+    # 4. Run Core-Satellite (Option D)
+    print("4. Running Core-Satellite Portfolios...")
+    base_rets = df_nav_base['nav'].pct_change().fillna(0)
+    stock_rets = df_all.set_index('trade_date')['pnl']
+    
+    df_nav_cs10 = pd.DataFrame(index=df_nav_base.index)
+    df_nav_cs10['nav'] = (0.90 * base_rets + 0.10 * stock_rets).add(1.0).cumprod() * 1000000.0
+    
+    df_nav_cs20 = pd.DataFrame(index=df_nav_base.index)
+    df_nav_cs20['nav'] = (0.80 * base_rets + 0.20 * stock_rets).add(1.0).cumprod() * 1000000.0
 
-print(f"{'Mult':<5s} | {'Repl CAGR':<9s} {'Repl Sharpe':<11s} {'Repl MDD':<8s} {'Repl Cal':<8s} | {'Sat CAGR':<8s} {'Sat Sharpe':<10s} {'Sat MDD':<8s} {'Sat Cal':<8s}")
-print("-" * 95)
-for r in sweep_results:
-    print(f"{r['multiplier']:<5.1f} | {r['b_cagr']:<9.2%} {r['b_sharpe']:<11.2f} {r['b_mdd']:<8.2%} {r['b_calmar']:<8.2f} | {r['c_cagr']:<8.2%} {r['c_sharpe']:<10.2f} {r['c_mdd']:<8.2%} {r['c_calmar']:<8.2f}")
-print("="*80)
+    # Segments
+    is_start, is_end = "2018-01-05", "2024-02-05"
+    oos_start, oos_end = "2024-02-06", "2026-03-11"
+    
+    strategies = {
+        'Baseline 8-Asset RP': df_nav_base,
+        'Active Replacement': df_nav_replace,
+        'Active Satellite': df_nav_satellite,
+        'Core-Satellite 10%': df_nav_cs10,
+        'Core-Satellite 20%': df_nav_cs20
+    }
+    
+    # Print function for segment
+    def print_metrics_table(start_dt, end_dt, name):
+        print("\n" + "="*95)
+        print(f"  PERFORMANCE SUMMARY: {name} ({start_dt} to {end_dt})")
+        print("="*95)
+        print(f"{'Strategy Name':<28s} | {'Total Ret':<9s} {'CAGR':<8s} {'Vol':<7s} {'Sharpe':<7s} {'MDD':<8s} {'Calmar':<6s}")
+        print("-" * 95)
+        for s_name, df_nav in strategies.items():
+            mask = (df_nav.index >= pd.Timestamp(start_dt)) & (df_nav.index <= pd.Timestamp(end_dt))
+            nav_s = df_nav['nav'][mask]
+            if len(nav_s) < 2: continue
+            
+            # Re-scale segment start to 1,000,000 to compute segment returns
+            seg_nav = nav_s / nav_s.iloc[0] * 1000000.0
+            
+            # Compute segment metrics
+            years = (nav_s.index[-1] - nav_s.index[0]).days / 365.25
+            cagr = (seg_nav.iloc[-1] / 1000000.0) ** (1.0 / years) - 1.0 if years > 0 else 0.0
+            total_ret = seg_nav.iloc[-1] / 1000000.0 - 1.0
+            daily_rets = seg_nav.pct_change().dropna()
+            ann_vol = daily_rets.std() * np.sqrt(252)
+            sharpe = cagr / ann_vol if ann_vol > 0 else 0.0
+            cum_max = seg_nav.cummax()
+            mdd = ((seg_nav - cum_max) / cum_max).min()
+            calmar = cagr / abs(mdd) if mdd != 0 else 0.0
+            
+            print(f"{s_name:<28s} | {total_ret:<9.2%} {cagr:<8.2%} {ann_vol:<7.2%} {sharpe:<7.2f} {mdd:<8.2%} {calmar:<6.2f}")
+        print("="*95)
+        
+    print_metrics_table(df_all['trade_date'].min(), df_all['trade_date'].max(), "FULL PERIOD")
+    print_metrics_table(is_start, is_end, "IN-SAMPLE")
+    print_metrics_table(oos_start, oos_end, "OUT-OF-SAMPLE (BLIND TEST)")
+    
+    # Save CSVs
+    df_nav_base.rename(columns={'nav': 'nav_baseline'}).to_csv(os.path.join(DATA_DIR, 'nav_baseline_full.csv'))
+    df_nav_replace.rename(columns={'nav': 'nav_replace_full'}).to_csv(os.path.join(DATA_DIR, 'nav_replace_full.csv'))
+    df_nav_satellite.rename(columns={'nav': 'nav_satellite_full'}).to_csv(os.path.join(DATA_DIR, 'nav_satellite_full.csv'))
+    df_nav_cs10.rename(columns={'nav': 'nav_cs10_full'}).to_csv(os.path.join(DATA_DIR, 'nav_cs10_full.csv'))
+    df_nav_cs20.rename(columns={'nav': 'nav_cs20_full'}).to_csv(os.path.join(DATA_DIR, 'nav_cs20_full.csv'))
+    print("Daily NAV curves saved to ETF data folder.")
+    
+    # Plotting helper
+    def generate_plot(start_dt, end_dt, filename, title):
+        plt.figure(figsize=(14, 10))
+        plt.subplot(2, 1, 1)
+        for s_name, color, df_nav in [
+            ('Baseline 8-Asset RP', '#1e88e5', df_nav_base),
+            ('Active Replacement', '#8e24aa', df_nav_replace),
+            ('Active Satellite', '#00897b', df_nav_satellite),
+            ('Core-Satellite 10%', '#fb8c00', df_nav_cs10),
+            ('Core-Satellite 20%', '#f4511e', df_nav_cs20)
+        ]:
+            mask = (df_nav.index >= pd.Timestamp(start_dt)) & (df_nav.index <= pd.Timestamp(end_dt))
+            nav_s = df_nav['nav'][mask]
+            # scale segment start to 1.0
+            plt.plot(nav_s.index, nav_s / nav_s.iloc[0], label=s_name, color=color, linewidth=1.5)
+            
+        plt.title(title, fontsize=12, fontweight='bold')
+        plt.ylabel("Normalized NAV")
+        plt.legend()
+        plt.grid(True, linestyle=':', alpha=0.6)
+        
+        plt.subplot(2, 1, 2)
+        for s_name, color, df_nav in [
+            ('Baseline 8-Asset RP', '#1e88e5', df_nav_base),
+            ('Active Replacement', '#8e24aa', df_nav_replace),
+            ('Active Satellite', '#00897b', df_nav_satellite),
+            ('Core-Satellite 10%', '#fb8c00', df_nav_cs10),
+            ('Core-Satellite 20%', '#f4511e', df_nav_cs20)
+        ]:
+            mask = (df_nav.index >= pd.Timestamp(start_dt)) & (df_nav.index <= pd.Timestamp(end_dt))
+            nav_s = df_nav['nav'][mask]
+            seg_nav = nav_s / nav_s.iloc[0]
+            cum_max = seg_nav.cummax()
+            dd = (seg_nav - cum_max) / cum_max * 100.0
+            plt.plot(dd.index, dd, label=s_name, color=color, linewidth=1.0, alpha=0.7)
+            
+        plt.ylabel("Drawdown (%)")
+        plt.legend()
+        plt.grid(True, linestyle=':', alpha=0.6)
+        plt.tight_layout()
+        
+        # Save to both folders
+        plot_path_results = os.path.join(rp.RESULTS_DIR, filename)
+        plot_path_artifacts = os.path.join(r"C:\Users\liuqi\.gemini\antigravity\brain\aedf743b-815e-4a43-a730-13a66c11d107", filename)
+        plt.savefig(plot_path_results, dpi=300)
+        plt.savefig(plot_path_artifacts, dpi=300)
+        plt.close()
+        print(f"Saved plot: {filename}")
+        
+    generate_plot(df_all['trade_date'].min(), df_all['trade_date'].max(), 'nav_integrated_comparison_full.png', "Integrated Strategy NAV Comparison (Full Period: 2018-2026)")
+    generate_plot(is_start, is_end, 'nav_integrated_comparison_is.png', "Integrated Strategy NAV Comparison (In-Sample: 2018-2024)")
+    generate_plot(oos_start, oos_end, 'nav_integrated_comparison_oos.png', "Integrated Strategy NAV Comparison (Out-of-Sample: 2024-2026)")
 
-# 6. Run Optimal Multiplier Configurations
-# Let's find the best multiplier for Replacement and Satellite
-# Criterion: Maximize CAGR subject to Max Drawdown >= -12.0%
-valid_b = [r for r in sweep_results if r['b_mdd'] >= -0.12]
-best_b_row = max(valid_b, key=lambda x: x['b_cagr']) if valid_b else sweep_results[0]
-best_b_mult = best_b_row['multiplier']
+def main():
+    evaluate_and_plot()
 
-valid_c = [r for r in sweep_results if r['c_mdd'] >= -0.12]
-best_c_row = max(valid_c, key=lambda x: x['c_cagr']) if valid_c else sweep_results[0]
-best_c_mult = best_c_row['multiplier']
-
-print(f"\nOptimal Replacement Multiplier (MDD >= -12%): {best_b_mult:.1f}x (CAGR: {best_b_row['b_cagr']:.2%}, Sharpe: {best_b_row['b_sharpe']:.2f}, MDD: {best_b_row['b_mdd']:.2%})")
-print(f"Optimal Satellite Multiplier   (MDD >= -12%): {best_c_mult:.1f}x (CAGR: {best_c_row['c_cagr']:.2%}, Sharpe: {best_c_row['c_sharpe']:.2f}, MDD: {best_c_row['c_mdd']:.2%})")
-
-# Re-run optimal configs for saving and plotting
-df_nav_replace_opt = run_backtest_replaced_equity(df_all, vol_target=0.10, mult=best_b_mult)
-metrics_replace_opt = rp.compute_metrics(df_nav_replace_opt['nav'])
-
-df_nav_satellite_opt = run_backtest_9assets(df_all, vol_target=0.10, mult=best_c_mult, buy_put=True)
-metrics_satellite_opt = rp.compute_metrics(df_nav_satellite_opt['nav'])
-
-# 7. Core-Satellite Portfolios (Option D)
-# Mix Baseline daily returns with daily_stock_opt returns
-base_rets = df_nav_base['nav'].pct_change().fillna(0)
-stock_rets = df_all.set_index('trade_date')['pnl_opt']
-
-df_nav_cs10 = pd.DataFrame(index=df_nav_base.index)
-df_nav_cs10['nav'] = (0.90 * base_rets + 0.10 * stock_rets).add(1.0).cumprod() * 1000000.0
-metrics_cs10 = rp.compute_metrics(df_nav_cs10['nav'])
-
-df_nav_cs20 = pd.DataFrame(index=df_nav_base.index)
-df_nav_cs20['nav'] = (0.80 * base_rets + 0.20 * stock_rets).add(1.0).cumprod() * 1000000.0
-metrics_cs20 = rp.compute_metrics(df_nav_cs20['nav'])
-
-# 8. Print final comparison report
-print("\n" + "="*80)
-print(f"  FINAL OPTIMIZED STRATEGY COMPARISON (2022-01-04 to 2026-03-11)")
-print("="*80)
-print(f"Baseline Portfolio (8-Asset)       | CAGR: {metrics_base['CAGR']:.2%}  Vol: {metrics_base['Volatility']:.2%}  Sharpe: {metrics_base['Sharpe']:.2f}  MDD: {metrics_base['Max Drawdown']:.2%}  Calmar: {metrics_base['Calmar']:.2f}")
-print(f"Active Replacement (5-Asset, {best_b_mult:.1f}x) | CAGR: {metrics_replace_opt['CAGR']:.2%}  Vol: {metrics_replace_opt['Volatility']:.2%}  Sharpe: {metrics_replace_opt['Sharpe']:.2f}  MDD: {metrics_replace_opt['Max Drawdown']:.2%}  Calmar: {metrics_replace_opt['Calmar']:.2f}")
-print(f"Active Satellite   (9-Asset, {best_c_mult:.1f}x) | CAGR: {metrics_satellite_opt['CAGR']:.2%}  Vol: {metrics_satellite_opt['Volatility']:.2%}  Sharpe: {metrics_satellite_opt['Sharpe']:.2f}  MDD: {metrics_satellite_opt['Max Drawdown']:.2%}  Calmar: {metrics_satellite_opt['Calmar']:.2f}")
-print(f"Core-Satellite 10% (90/10 Fixed)   | CAGR: {metrics_cs10['CAGR']:.2%}  Vol: {metrics_cs10['Volatility']:.2%}  Sharpe: {metrics_cs10['Sharpe']:.2f}  MDD: {metrics_cs10['Max Drawdown']:.2%}  Calmar: {metrics_cs10['Calmar']:.2f}")
-print(f"Core-Satellite 20% (80/20 Fixed)   | CAGR: {metrics_cs20['CAGR']:.2%}  Vol: {metrics_cs20['Volatility']:.2%}  Sharpe: {metrics_cs20['Sharpe']:.2f}  MDD: {metrics_cs20['Max Drawdown']:.2%}  Calmar: {metrics_cs20['Calmar']:.2f}")
-print("="*80)
-
-# Save NAV data to CSV
-df_nav_base.rename(columns={'nav': 'nav_baseline'}).to_csv(os.path.join(DATA_DIR, 'nav_baseline_22_26.csv'))
-df_nav_replace_opt.rename(columns={'nav': 'nav_replace_opt'}).to_csv(os.path.join(DATA_DIR, 'nav_replace_opt_22_26.csv'))
-df_nav_satellite_opt.rename(columns={'nav': 'nav_satellite_opt'}).to_csv(os.path.join(DATA_DIR, 'nav_satellite_opt_22_26.csv'))
-df_nav_cs10.rename(columns={'nav': 'nav_cs10'}).to_csv(os.path.join(DATA_DIR, 'nav_cs10_22_26.csv'))
-df_nav_cs20.rename(columns={'nav': 'nav_cs20'}).to_csv(os.path.join(DATA_DIR, 'nav_cs20_22_26.csv'))
-print("Daily NAV curves saved to ETF data folder.")
-
-# 9. Plot comparison curves
-import matplotlib.pyplot as plt
-
-plt.figure(figsize=(14, 10))
-plt.subplot(2, 1, 1)
-plt.plot(df_nav_base.index, df_nav_base['nav'] / 1e6, label='Baseline Portfolio (8-Asset)', color='#1e88e5', linewidth=1.5)
-plt.plot(df_nav_satellite_opt.index, df_nav_satellite_opt['nav'] / 1e6, label=f'Active Satellite (9-Asset, {best_c_mult:.1f}x)', color='#00897b', linewidth=2.0)
-plt.plot(df_nav_replace_opt.index, df_nav_replace_opt['nav'] / 1e6, label=f'Active Replacement (5-Asset, {best_b_mult:.1f}x)', color='#8e24aa', linewidth=1.5, alpha=0.8)
-plt.plot(df_nav_cs10.index, df_nav_cs10['nav'] / 1e6, label='Core-Satellite 10% (90/10 Fixed)', color='#fb8c00', linewidth=1.5, alpha=0.8)
-plt.plot(df_nav_cs20.index, df_nav_cs20['nav'] / 1e6, label='Core-Satellite 20% (80/20 Fixed)', color='#f4511e', linewidth=1.5, alpha=0.8)
-plt.title("Integrated Strategy NAV Comparison (2022-01-04 to 2026-03-11)", fontsize=12, fontweight='bold')
-plt.ylabel("Normalized NAV")
-plt.legend()
-plt.grid(True, linestyle=':', alpha=0.6)
-
-plt.subplot(2, 1, 2)
-dd_base = (df_nav_base['nav'] - df_nav_base['nav'].cummax()) / df_nav_base['nav'].cummax() * 100.0
-dd_sat_opt = (df_nav_satellite_opt['nav'] - df_nav_satellite_opt['nav'].cummax()) / df_nav_satellite_opt['nav'].cummax() * 100.0
-dd_rep_opt = (df_nav_replace_opt['nav'] - df_nav_replace_opt['nav'].cummax()) / df_nav_replace_opt['nav'].cummax() * 100.0
-dd_cs10 = (df_nav_cs10['nav'] - df_nav_cs10['nav'].cummax()) / df_nav_cs10['nav'].cummax() * 100.0
-dd_cs20 = (df_nav_cs20['nav'] - df_nav_cs20['nav'].cummax()) / df_nav_cs20['nav'].cummax() * 100.0
-
-plt.fill_between(dd_sat_opt.index, dd_sat_opt, 0, label='Active Satellite Drawdown (Opt)', color='#00897b', alpha=0.3)
-plt.plot(dd_base.index, dd_base, label='Baseline Drawdown', color='#1e88e5', alpha=0.5, linewidth=1.0)
-plt.plot(dd_rep_opt.index, dd_rep_opt, label='Replacement Drawdown (Opt)', color='#8e24aa', alpha=0.5, linewidth=1.0)
-plt.plot(dd_cs10.index, dd_cs10, label='CS 10% Drawdown', color='#fb8c00', alpha=0.5, linewidth=1.0)
-plt.plot(dd_cs20.index, dd_cs20, label='CS 20% Drawdown', color='#f4511e', alpha=0.5, linewidth=1.0)
-plt.ylabel("Drawdown (%)")
-plt.legend()
-plt.grid(True, linestyle=':', alpha=0.6)
-plt.tight_layout()
-
-# Save plot to results and artifacts folders
-plot_path_results = os.path.join(rp.RESULTS_DIR, 'nav_integrated_comparison.png')
-plot_path_artifacts = r"C:\Users\liuqi\.gemini\antigravity\brain\aedf743b-815e-4a43-a730-13a66c11d107\nav_integrated_comparison.png"
-plt.savefig(plot_path_results, dpi=300)
-plt.savefig(plot_path_artifacts, dpi=300)
-plt.close()
-print("NAV Comparison plot saved.")
-
+if __name__ == "__main__":
+    main()
