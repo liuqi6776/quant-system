@@ -114,7 +114,8 @@ def build_features(df):
     # Technical momentum & bias indicators
     for w in [5, 20]:
         df[f'mom_{w}'] = g.transform(lambda x: x / x.shift(w) - 1)
-        df[f'bias_{w}'] = (df['close'] - g.transform(lambda x: x.rolling(w).mean())) / (df['close'].rolling(w).mean() + 1e-8)
+        ma = g.transform(lambda x: x.rolling(w).mean())
+        df[f'bias_{w}'] = (df['close'] - ma) / (ma + 1e-8)
     
     # Valuation and Size indicators
     df['ep'] = 1.0 / (df['pe'] + 1e-8)
@@ -201,11 +202,17 @@ def run_daily_super_backtest(df, start_date='2018-01-01'):
                     cost = max(5.0, revenue * COMMISSION) + revenue * STAMP_DUTY
                     capital += (revenue - cost)
                     holdings.remove(pos)
-            
             # B. Rolling train model if month changes
             month = date.month
             if month != last_month:
-                train_data = df[(df['trade_date'] < date) & (df['trade_date'] >= date - pd.Timedelta(days=365*2))]
+                # Ensure training end date is strictly look-ahead-free (at least 7 trading days before rebalance date)
+                cutoff_idx = all_dates.index(date) - 7
+                if cutoff_idx >= 0:
+                    cutoff_date = all_dates[cutoff_idx]
+                    train_data = df[(df['trade_date'] <= cutoff_date) & (df['trade_date'] >= cutoff_date - pd.Timedelta(days=365*2))]
+                else:
+                    train_data = pd.DataFrame()
+                
                 # Downsample training to weekly frequency to increase speed
                 unique_train_dates = sorted(train_data['trade_date'].unique())
                 train_dates_downsampled = unique_train_dates[::5]
@@ -271,8 +278,15 @@ def generate_pit_signals(df, target_date):
         
     print(f"\nGenerating signals for Close of: {target_dt.strftime('%Y-%m-%d')} (Execution: Next Open)")
     
-    # 1. Training Set: 2 years lookback ending on T-1
-    train_data = df[(df['trade_date'] < target_dt) & (df['trade_date'] >= target_dt - pd.Timedelta(days=365*2))]
+    # 1. Training Set: 2 years lookback ending on or before T-7 (to ensure all labels fully realized by T-1)
+    target_idx = all_dates.index(target_dt)
+    cutoff_idx = target_idx - 7
+    if cutoff_idx >= 0:
+        cutoff_date = all_dates[cutoff_idx]
+        train_data = df[(df['trade_date'] <= cutoff_date) & (df['trade_date'] >= cutoff_date - pd.Timedelta(days=365*2))]
+    else:
+        train_data = pd.DataFrame()
+        
     unique_train_dates = sorted(train_data['trade_date'].unique())
     train_dates_downsampled = unique_train_dates[::5]
     train_data_downsampled = train_data[train_data['trade_date'].isin(train_dates_downsampled)]
